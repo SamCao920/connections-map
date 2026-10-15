@@ -2,7 +2,8 @@
 
 A private map of the people you know, so that when you visit a city you remember who lives there and can reach out for coffee.
 
-- Pin each connection to a city, with where you met, tags, how to reach them, and notes.
+- Pin each connection to a city, with where you met, tags, and how to reach them.
+- **Meeting log:** record each coffee or call with a date, where, and what you talked about. The list shows when you last met.
 - **Expiry:** give a connection an end date (“until March 2027”) or a duration (“for 4 years”). After that they turn grey: you are no longer sure they still live there.
 - **Who’s near:** type a city and a radius to list everyone within range, current people first.
 - Works on phone and laptop.
@@ -38,7 +39,9 @@ The token is stored only in your browser and sent only to `api.github.com`. Anyo
       "met": "Making Progress, Oct 2026",
       "tags": ["making progress"],
       "reach": "alice@example.com",
-      "notes": "",
+      "meetings": [
+        { "id": "uuid", "date": "2026-10-11", "where": "Making Progress, Berkeley", "note": "Talked about housing policy" }
+      ],
       "addedAt": "2026-10-15T19:00:00.000Z",
       "expiresAt": "2030-10-15T19:00:00.000Z",
       "updatedAt": "2026-10-15T19:00:00.000Z"

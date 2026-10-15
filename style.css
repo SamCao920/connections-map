@@ -233,3 +233,21 @@ dialog hr { border: 0; border-top: 1px solid var(--line); margin: 18px 0 14px; }
 }
 .chip button { background: none; border: 0; color: inherit; cursor: pointer; padding: 0 4px; font-size: 15px; line-height: 1; }
 .combo > input { width: 100%; }
+
+/* Meeting log */
+.field-label { display: block; font-weight: 600; font-size: 13px; margin-bottom: 4px; }
+.log-new { display: grid; gap: 6px; padding: 8px; border: 1px dashed var(--line); border-radius: 6px; }
+.log-new-row { display: flex; gap: 6px; }
+.log-new-row input[type="date"] { flex: none; }
+.log-new-row input:not([type]) { flex: 1; min-width: 0; }
+.log-new > * { min-width: 0; }
+#edit-view { overflow-x: hidden; }
+.log-new .btn { justify-self: start; }
+.log { list-style: none; margin: 10px 0 0; padding: 0 0 0 12px; border-left: 2px solid var(--line); }
+.log li { margin: 0 0 10px; }
+.log-head { display: flex; align-items: baseline; gap: 8px; }
+.log-date { font-weight: 600; font-size: 13px; white-space: nowrap; }
+.log-where { font-size: 13px; color: var(--muted); }
+.log-del { margin-left: auto; background: none; border: 0; color: var(--muted); cursor: pointer; font-size: 16px; line-height: 1; padding: 0 4px; }
+.log-del:hover { color: var(--danger); }
+.log-note { margin: 2px 0 0; font-size: 14px; white-space: pre-wrap; }

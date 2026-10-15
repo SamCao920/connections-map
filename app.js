@@ -294,7 +294,7 @@
       if (!showExp && isExpired(c)) return false;
       if (activeTags.size && !(c.tags || []).some((t) => activeTags.has(t))) return false;
       if (q) {
-        const hay = [c.name, c.place?.label, c.met, c.notes, ...(c.tags || [])].join(" ").toLowerCase();
+        const hay = [c.name, c.place?.label, c.met, c.notes, ...(c.tags || []), ...(c.meetings || []).flatMap((m) => [m.where, m.note])].join(" ").toLowerCase();
         if (!hay.includes(q)) return false;
       }
       return true;
@@ -333,6 +333,7 @@
           <div>
             <div class="name">${esc(c.name)}</div>
             <div class="meta">${meta}${esc(dist)}</div>
+            ${lastMet(c) ? `<div class="exp">Last met ${esc(agoText(lastMet(c)))}${meetCount(c) > 1 ? ` · ${meetCount(c)} meetings` : ""}</div>` : ""}
             ${c.expiresAt ? `<div class="exp">${esc(expiryText(c))}</div>` : ""}
           </div>
         </li>`;
@@ -466,7 +467,13 @@
     $("#f-tags").value = "";
     renderChips();
     $("#f-reach").value = c?.reach || "";
-    $("#f-notes").value = c?.notes || "";
+    // Old free-text notes become an undated first log entry.
+    draftMeetings = (c?.meetings || []).map((m) => ({ ...m }));
+    if (c?.notes && !draftMeetings.some((m) => m.legacy)) {
+      draftMeetings.push({ id: uid(), date: (c.addedAt || nowISO()).slice(0, 10), where: "Notes", note: c.notes, legacy: true });
+    }
+    resetMeetingInputs();
+    renderMeetings();
     $("#f-place-q").value = "";
     $("#f-place-results").hidden = true;
     $("#form-error").hidden = true;
@@ -518,6 +525,66 @@
       ul.innerHTML = `<li><button type="button" disabled>${esc(e.message)}</button></li>`;
     }
   }
+
+  // ---------- Meeting log ----------
+  let draftMeetings = [];
+  const todayStr = () => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  };
+  const sortMeetings = (ms) => ms.slice().sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+  function fmtDay(s) {
+    const [y, m, d] = s.split("-").map(Number);
+    return `${MONTHS[m - 1]} ${d}, ${y}`;
+  }
+  function lastMet(c) {
+    const ms = (c.meetings || []).filter((m) => !m.legacy);
+    if (!ms.length) return null;
+    return sortMeetings(ms)[0].date;
+  }
+  function agoText(dateStr) {
+    const [y, m, d] = dateStr.split("-").map(Number);
+    const days = Math.floor((Date.now() - new Date(y, m - 1, d).getTime()) / 86400000);
+    if (days < 0) return `on ${fmtDay(dateStr)}`;
+    if (days === 0) return "today";
+    if (days < 14) return `${days} day${days === 1 ? "" : "s"} ago`;
+    if (days < 60) return `${Math.round(days / 7)} weeks ago`;
+    if (days < 730) return `${Math.round(days / 30.4)} months ago`;
+    return `${Math.round(days / 365.25)} years ago`;
+  }
+  const meetCount = (c) => (c.meetings || []).filter((m) => !m.legacy).length;
+  function resetMeetingInputs() {
+    $("#m-date").value = todayStr();
+    $("#m-where").value = "";
+    $("#m-note").value = "";
+  }
+  function logPendingMeeting() {
+    const where = $("#m-where").value.trim(), note = $("#m-note").value.trim();
+    if (!where && !note) return false;
+    draftMeetings.push({ id: uid(), date: $("#m-date").value || todayStr(), where, note });
+    resetMeetingInputs();
+    renderMeetings();
+    return true;
+  }
+  function renderMeetings() {
+    const list = sortMeetings(draftMeetings);
+    $("#m-list").innerHTML = list.length
+      ? list.map((m) => `<li>
+          <div class="log-head"><span class="log-date">${esc(fmtDay(m.date))}</span>${m.where ? `<span class="log-where">${esc(m.where)}</span>` : ""}
+            <button type="button" class="log-del" data-id="${esc(m.id)}" aria-label="Remove meeting on ${esc(fmtDay(m.date))}">×</button></div>
+          ${m.note ? `<p class="log-note">${esc(m.note)}</p>` : ""}
+        </li>`).join("")
+      : `<li class="muted small">No meetings logged yet.</li>`;
+  }
+  $("#m-add").addEventListener("click", () => {
+    if (!logPendingMeeting()) { $("#m-where").focus(); }
+  });
+  $("#m-list").addEventListener("click", (e) => {
+    const b = e.target.closest(".log-del");
+    if (!b) return;
+    draftMeetings = draftMeetings.filter((m) => m.id !== b.dataset.id);
+    renderMeetings();
+  });
 
   // ---------- Suggestion dropdowns (tags, where you met) ----------
   let draftTags = [];
@@ -642,7 +709,8 @@
       met: $("#f-met").value.trim(),
       tags,
       reach: $("#f-reach").value.trim(),
-      notes: $("#f-notes").value.trim(),
+      notes: "",
+      meetings: (logPendingMeeting(), sortMeetings(draftMeetings)),
       expiresAt: computeExpiry(),
       updatedAt: nowISO(),
     };

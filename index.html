@@ -109,8 +109,19 @@
         </div>
 
         <div class="field">
-          <label for="f-notes">Notes</label>
-          <textarea id="f-notes" rows="3" placeholder="What you talked about, what they’re working on"></textarea>
+          <span class="field-label">Meetings</span>
+          <div class="log-new">
+            <div class="log-new-row">
+              <label class="visually-hidden" for="m-date">Date</label>
+              <input id="m-date" type="date">
+              <label class="visually-hidden" for="m-where">Where or how</label>
+              <input id="m-where" placeholder="Coffee in NYC, Zoom…" autocomplete="off">
+            </div>
+            <label class="visually-hidden" for="m-note">What you talked about</label>
+            <textarea id="m-note" rows="2" placeholder="What you talked about, follow-ups"></textarea>
+            <button type="button" class="btn" id="m-add">Log meeting</button>
+          </div>
+          <ol id="m-list" class="log"></ol>
         </div>
 
         <fieldset class="field expiry">
