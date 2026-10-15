@@ -8,9 +8,18 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='11' fill='%232443C9'/%3E%3Ccircle cx='16' cy='16' r='4' fill='white'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Public+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="glass.css">
+<script>
+  // Set the theme before first paint to avoid a flash.
+  (function () {
+    var t; try { t = localStorage.getItem("cm.theme"); } catch (e) {}
+    if (t !== "light" && t !== "dark") t = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+    document.documentElement.dataset.theme = t;
+  })();
+</script>
 </head>
 <body>
 <div class="app">
@@ -19,6 +28,10 @@
       <h1>Connections</h1>
       <div class="head-actions">
         <span class="sync" id="sync" role="status" aria-live="polite"></span>
+        <button class="icon-btn" id="theme-btn" aria-label="Switch to dark mode" title="Light / dark">
+          <svg class="i-moon" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M20.4 14.6A8.5 8.5 0 0 1 9.4 3.6a.6.6 0 0 0-.8-.7A9.5 9.5 0 1 0 21.1 15.4a.6.6 0 0 0-.7-.8Z"/></svg>
+          <svg class="i-sun" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><circle cx="12" cy="12" r="4.5" fill="currentColor"/><g stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></g></svg>
+        </button>
         <button class="icon-btn" id="settings-btn" aria-label="Settings" title="Settings">
           <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Zm8.6 2.2-1.8-.3a7 7 0 0 0-.7-1.7l1.1-1.5a.8.8 0 0 0-.1-1l-1.3-1.3a.8.8 0 0 0-1-.1l-1.5 1.1a7 7 0 0 0-1.7-.7l-.3-1.8a.8.8 0 0 0-.8-.7h-1.8a.8.8 0 0 0-.8.7l-.3 1.8a7 7 0 0 0-1.7.7L6.2 4.8a.8.8 0 0 0-1 .1L3.9 6.2a.8.8 0 0 0-.1 1l1.1 1.5a7 7 0 0 0-.7 1.7l-1.8.3a.8.8 0 0 0-.7.8v1.8c0 .4.3.7.7.8l1.8.3c.2.6.4 1.2.7 1.7l-1.1 1.5a.8.8 0 0 0 .1 1l1.3 1.3c.3.3.7.3 1 .1l1.5-1.1c.5.3 1.1.5 1.7.7l.3 1.8c.1.4.4.7.8.7h1.8c.4 0 .7-.3.8-.7l.3-1.8c.6-.2 1.2-.4 1.7-.7l1.5 1.1c.3.2.7.2 1-.1l1.3-1.3c.3-.3.3-.7.1-1l-1.1-1.5c.3-.5.5-1.1.7-1.7l1.8-.3c.4-.1.7-.4.7-.8v-1.8a.8.8 0 0 0-.7-.8Z"/></svg>
         </button>
@@ -198,10 +211,35 @@
     </div>
 
     <hr>
+    <h3>Import from Apple Contacts</h3>
+    <p class="muted small">Export a vCard first. Mac: select people in Contacts → File → Export → Export vCard. Or iCloud.com → Contacts → select → Export vCard. Then choose who to add.</p>
+    <div class="form-actions">
+      <label class="btn file-btn">Choose .vcf file<input type="file" id="s-vcf" accept=".vcf,text/vcard,text/x-vcard" hidden></label>
+    </div>
+
+    <hr>
     <h3>Backup</h3>
     <div class="form-actions">
       <button type="button" class="btn" id="s-export">Export JSON</button>
       <label class="btn file-btn">Import JSON<input type="file" id="s-import" accept="application/json,.json" hidden></label>
+    </div>
+  </form>
+</dialog>
+
+<!-- vCard import picker -->
+<dialog id="vcf">
+  <form method="dialog" id="vcf-form">
+    <h2>Choose who to add</h2>
+    <p id="vcf-summary" class="muted small"></p>
+    <div class="vcf-tools">
+      <label class="toggle"><input type="checkbox" id="vcf-all"> Select everyone with an address</label>
+      <input id="vcf-filter" type="search" placeholder="Filter" autocomplete="off" aria-label="Filter contacts">
+    </div>
+    <ul id="vcf-list" class="vcf-list"></ul>
+    <p id="vcf-msg" class="small" role="status"></p>
+    <div class="form-actions">
+      <button type="button" class="btn primary" id="vcf-go">Add selected</button>
+      <button type="submit" class="btn" value="close">Close</button>
     </div>
   </form>
 </dialog>

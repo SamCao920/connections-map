@@ -223,13 +223,12 @@
 
   // ---------- Map ----------
   const map = L.map("map", { worldCopyJump: true, zoomControl: true }).setView([30, -40], 2);
-  const dark = matchMedia("(prefers-color-scheme: dark)").matches;
   L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
     maxZoom: 19,
-    className: dark ? "tiles-dark" : "tiles-light",
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
   }).addTo(map);
   const markerLayer = L.layerGroup().addTo(map);
+  window.cmMap = map; // handy for debugging from the console
   let nearCircle = null, draftMarker = null;
 
   function pinIcon(count, cls) {
@@ -280,10 +279,22 @@
     if (draftPlace && draftPlace.lat === lat && draftPlace.lng === lng) setDraftPlace({ lat, lng, label });
   });
 
+  // The floating panel covers the left 400px on wide screens and the bottom half on phones.
+  function viewPad() {
+    return innerWidth > 760 ? { paddingTopLeft: [410, 40], paddingBottomRight: [40, 40] }
+      : { paddingTopLeft: [24, 24], paddingBottomRight: [24, innerHeight * 0.56] };
+  }
+  function centerOn(latlng, zoom) {
+    const p = viewPad();
+    const dx = (p.paddingTopLeft[0] - p.paddingBottomRight[0]) / 2;
+    const dy = (p.paddingTopLeft[1] - p.paddingBottomRight[1]) / 2;
+    const pt = map.project(latlng, zoom).subtract([dx, dy]);
+    map.setView(map.unproject(pt, zoom), zoom);
+  }
   function fitTo(contacts) {
     const pts = contacts.filter((c) => c.place).map((c) => [c.place.lat, c.place.lng]);
-    if (pts.length === 1) map.setView(pts[0], 9);
-    else if (pts.length > 1) map.fitBounds(pts, { padding: [40, 40], maxZoom: 9 });
+    if (pts.length === 1) centerOn(pts[0], 9);
+    else if (pts.length > 1) map.fitBounds(pts, { ...viewPad(), maxZoom: 9 });
   }
 
   // ---------- List rendering ----------
@@ -327,8 +338,8 @@
       .map((c) => {
         const exp = isExpired(c);
         const dist = nearFilter && c.place ? ` · ${Math.round(miles(nearFilter, c.place))} mi` : "";
-        const meta = [c.place?.label, c.met].filter(Boolean).map(esc).join(" · ");
-        return `<li class="row ${exp ? "expired" : ""}" tabindex="0" data-id="${esc(c.id)}">
+        const meta = [c.place?.label || "No location yet", c.met].filter(Boolean).map(esc).join(" · ");
+        return `<li class="row ${exp ? "expired" : ""} ${c.place ? "" : "unplaced"}" tabindex="0" data-id="${esc(c.id)}">
           <span class="dot" aria-hidden="true"></span>
           <div>
             <div class="name">${esc(c.name)}</div>
@@ -379,7 +390,7 @@
       nearFilter = { lat: hit.lat, lng: hit.lng, miles: mi, label: hit.label };
       if (nearCircle) nearCircle.remove();
       nearCircle = L.circle([hit.lat, hit.lng], { radius: mi * 1609.34, color: getCss("--cobalt"), weight: 1, fillOpacity: 0.06 }).addTo(map);
-      map.fitBounds(nearCircle.getBounds(), { padding: [20, 20] });
+      map.fitBounds(nearCircle.getBounds(), viewPad());
       render();
       const n = $("#list").querySelectorAll(".row").length;
       const active = $("#list").querySelectorAll(".row:not(.expired)").length;
@@ -442,7 +453,7 @@
       el.classList.add("set");
       if (draftMarker) draftMarker.remove();
       draftMarker = L.marker([p.lat, p.lng], { icon: pinIcon(1, "draft"), interactive: false }).addTo(map);
-      map.setView([p.lat, p.lng], Math.max(map.getZoom(), 6));
+      centerOn([p.lat, p.lng], Math.max(map.getZoom(), 6));
     } else {
       el.textContent = "No place chosen. Search, or tap the map.";
       el.classList.remove("set");
@@ -818,6 +829,137 @@
     if (document.visibilityState === "visible" && $("#edit-view").hidden) {
       if (connected() && !saving && !dirty) load(); else render();
     }
+  });
+
+  // ---------- Theme ----------
+  function applyTheme(t) {
+    document.documentElement.dataset.theme = t;
+    $("#theme-btn").setAttribute("aria-label", t === "dark" ? "Switch to light mode" : "Switch to dark mode");
+  }
+  applyTheme(document.documentElement.dataset.theme || "light");
+  $("#theme-btn").addEventListener("click", () => {
+    const t = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+    try { localStorage.setItem("cm.theme", t); } catch {}
+    applyTheme(t);
+  });
+
+  // ---------- Apple Contacts (vCard) import ----------
+  function parseVcf(text) {
+    // Unfold continuation lines, then split into cards.
+    const lines = text.replace(/\r\n/g, "\n").replace(/\n[ \t]/g, "").split("\n");
+    const cards = [];
+    let cur = null;
+    const unesc = (v) => v.replace(/\\n/gi, " ").replace(/\\([,;\\])/g, "$1").trim();
+    for (const line of lines) {
+      if (/^BEGIN:VCARD/i.test(line)) { cur = { name: "", emails: [], phones: [], adr: null, org: "" }; continue; }
+      if (/^END:VCARD/i.test(line)) { if (cur && cur.name) cards.push(cur); cur = null; continue; }
+      if (!cur) continue;
+      const i = line.indexOf(":");
+      if (i < 0) continue;
+      const key = line.slice(0, i).replace(/^item\d+\./i, "").split(";")[0].toUpperCase();
+      const val = line.slice(i + 1);
+      if (key === "FN") cur.name = unesc(val);
+      else if (key === "N" && !cur.name) {
+        const [last, first] = val.split(";").map(unesc);
+        cur.name = [first, last].filter(Boolean).join(" ");
+      }
+      else if (key === "EMAIL") cur.emails.push(unesc(val));
+      else if (key === "TEL") cur.phones.push(unesc(val));
+      else if (key === "ORG" && !cur.org) cur.org = unesc(val.split(";")[0]);
+      else if (key === "ADR" && !cur.adr) {
+        const p = val.split(";").map(unesc); // pobox;ext;street;city;region;postal;country
+        const city = p[3] || "", region = p[4] || "", country = p[6] || "";
+        if (city || region || country) cur.adr = { city, region, country, query: [city, region, country].filter(Boolean).join(", ") };
+      }
+    }
+    return cards;
+  }
+
+  let vcfCards = [];
+  const vdlg = $("#vcf");
+  function drawVcf() {
+    const q = $("#vcf-filter").value.trim().toLowerCase();
+    const existing = new Set(live().map((c) => c.name.toLowerCase()));
+    $("#vcf-list").innerHTML = vcfCards
+      .map((c, i) => ({ c, i }))
+      .filter(({ c }) => !q || (c.name + " " + (c.adr?.query || "") + " " + c.org).toLowerCase().includes(q))
+      .map(({ c, i }) => {
+        const dup = existing.has(c.name.toLowerCase());
+        const sub = c.state === "done" ? `Added · ${esc(c.placeLabel || "no location")}`
+          : c.state === "fail" ? `Couldn’t place “${esc(c.adr?.query || "")}”; added without a location`
+          : dup ? "Already on your map"
+          : c.adr ? esc(c.adr.query) : "No address: will be added without a location";
+        return `<li class="${c.state === "done" ? "done" : ""}"><label>
+          <input type="checkbox" data-i="${i}" ${c.selected ? "checked" : ""} ${dup || c.state ? "disabled" : ""}>
+          <span><span class="v-name">${esc(c.name)}</span>${c.org ? ` <span class="v-sub">· ${esc(c.org)}</span>` : ""}<br><span class="v-sub">${sub}</span></span>
+        </label></li>`;
+      })
+      .join("");
+    const n = vcfCards.filter((c) => c.selected).length;
+    $("#vcf-go").textContent = n ? `Add ${n} ${n === 1 ? "person" : "people"}` : "Add selected";
+    $("#vcf-go").disabled = !n;
+  }
+  $("#vcf-list").addEventListener("change", (e) => {
+    const cb = e.target.closest("input[data-i]");
+    if (cb) { vcfCards[+cb.dataset.i].selected = cb.checked; drawVcf(); }
+  });
+  $("#vcf-filter").addEventListener("input", drawVcf);
+  $("#vcf-all").addEventListener("change", (e) => {
+    const existing = new Set(live().map((c) => c.name.toLowerCase()));
+    for (const c of vcfCards) if (c.adr && !c.state && !existing.has(c.name.toLowerCase())) c.selected = e.target.checked;
+    drawVcf();
+  });
+  $("#s-vcf").addEventListener("change", async (e) => {
+    const f = e.target.files[0];
+    e.target.value = "";
+    if (!f) return;
+    vcfCards = parseVcf(await f.text()).sort((a, b) => a.name.localeCompare(b.name));
+    if (!vcfCards.length) { $("#s-msg").textContent = "No contacts found in that file. Make sure it’s a vCard (.vcf) export."; return; }
+    const withAdr = vcfCards.filter((c) => c.adr).length;
+    $("#vcf-summary").textContent = `${vcfCards.length} contacts in the file, ${withAdr} with an address. Only the people you tick are added.`;
+    $("#vcf-filter").value = "";
+    $("#vcf-all").checked = false;
+    $("#vcf-msg").textContent = "";
+    dlg.close();
+    vdlg.showModal();
+    drawVcf();
+  });
+  $("#vcf-go").addEventListener("click", async () => {
+    const todo = vcfCards.filter((c) => c.selected && !c.state);
+    const btn = $("#vcf-go");
+    btn.disabled = true;
+    let i = 0;
+    for (const c of todo) {
+      i++;
+      $("#vcf-msg").textContent = `Placing ${i} of ${todo.length}… (about ${todo.length - i + 1} s left)`;
+      let place = null;
+      if (c.adr) {
+        // Try the full address, then looser versions (city + country, city alone).
+        const tries = [c.adr.query, [c.adr.city, c.adr.country].filter(Boolean).join(", "), c.adr.city]
+          .filter((q, k, a) => q && a.indexOf(q) === k);
+        for (const q of tries) {
+          try { [place] = await geocode(q); } catch {}
+          if (place) break;
+        }
+      }
+      const now = nowISO();
+      data.contacts.push({
+        id: uid(), name: c.name,
+        place: place ? { label: place.label, lat: +place.lat.toFixed(5), lng: +place.lng.toFixed(5) } : null,
+        met: "", tags: ["imported"],
+        reach: [...c.emails, ...c.phones].join(", "),
+        notes: "", meetings: [], expiresAt: null, addedAt: now, updatedAt: now,
+      });
+      c.selected = false;
+      c.state = place || !c.adr ? "done" : "fail";
+      c.placeLabel = place?.label;
+      drawVcf();
+    }
+    save();
+    render();
+    $("#vcf-msg").textContent = `Added ${todo.length}. They’re tagged “imported” so you can find and tidy them.`;
+    btn.disabled = false;
+    drawVcf();
   });
 
   // ---------- Start ----------
