@@ -462,7 +462,9 @@
     $("#edit-title").textContent = c ? c.name : "Add a connection";
     $("#f-name").value = c?.name || "";
     $("#f-met").value = c?.met || "";
-    $("#f-tags").value = (c?.tags || []).join(", ");
+    draftTags = [...(c?.tags || [])];
+    $("#f-tags").value = "";
+    renderChips();
     $("#f-reach").value = c?.reach || "";
     $("#f-notes").value = c?.notes || "";
     $("#f-place-q").value = "";
@@ -488,7 +490,7 @@
     setDraftPlace(c?.place || null);
     showView("edit");
     $("#edit-view").scrollTop = 0;
-    (c ? $("#f-met") : $("#f-name")).focus({ preventScroll: true });
+    if (!c) $("#f-name").focus({ preventScroll: true });
   }
 
   function closeEdit() {
@@ -516,6 +518,111 @@
       ul.innerHTML = `<li><button type="button" disabled>${esc(e.message)}</button></li>`;
     }
   }
+
+  // ---------- Suggestion dropdowns (tags, where you met) ----------
+  let draftTags = [];
+  const normTag = (t) => t.trim().toLowerCase().replace(/\s+/g, " ");
+  function allTags() {
+    const counts = new Map();
+    for (const c of live()) for (const t of c.tags || []) counts.set(t, (counts.get(t) || 0) + 1);
+    return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([t, n]) => ({ value: t, count: n }));
+  }
+  function allMet() {
+    const counts = new Map();
+    for (const c of live()) if (c.met) counts.set(c.met, (counts.get(c.met) || 0) + 1);
+    return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([t, n]) => ({ value: t, count: n }));
+  }
+  function addTag(raw) {
+    for (const part of String(raw).split(",")) {
+      const t = normTag(part);
+      if (t && !draftTags.includes(t)) draftTags.push(t);
+    }
+    $("#f-tags").value = "";
+    renderChips();
+  }
+  function renderChips() {
+    $("#f-tags-chips").innerHTML = draftTags
+      .map((t, i) => `<span class="chip">${esc(t)}<button type="button" data-i="${i}" aria-label="Remove ${esc(t)}">×</button></span>`)
+      .join("");
+  }
+  $("#f-tags-chips").addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-i]");
+    if (!b) return;
+    draftTags.splice(+b.dataset.i, 1);
+    renderChips();
+    $("#f-tags").focus();
+  });
+  $("#f-tags-box").addEventListener("click", (e) => { if (e.target.id === "f-tags-box") $("#f-tags").focus(); });
+
+  // Generic combobox: options(query) -> [{value,label,count}], pick(value)
+  function combo(input, ul, options, pick, { onEnterNoPick } = {}) {
+    let items = [], hi = -1;
+    function open() {
+      items = options(input.value);
+      hi = items.length && input.value.trim() ? 0 : -1;
+      draw();
+    }
+    function close() { ul.hidden = true; input.setAttribute("aria-expanded", "false"); hi = -1; }
+    function draw() {
+      if (!items.length) return close();
+      ul.innerHTML = items
+        .map((it, i) => `<li role="option" id="${ul.id}-${i}" aria-selected="${i === hi}" data-i="${i}">${it.label ?? esc(it.value)}${it.count ? `<span class="count">${it.count}</span>` : ""}</li>`)
+        .join("");
+      ul.hidden = false;
+      input.setAttribute("aria-expanded", "true");
+      if (hi >= 0) input.setAttribute("aria-activedescendant", `${ul.id}-${hi}`); else input.removeAttribute("aria-activedescendant");
+    }
+    function choose(i) { pick(items[i].value); open(); }
+    ul.addEventListener("mousedown", (e) => {
+      const li = e.target.closest("li[data-i]");
+      if (!li) return;
+      e.preventDefault(); // keep focus in the input
+      choose(+li.dataset.i);
+    });
+    input.addEventListener("input", open);
+    input.addEventListener("click", open);
+    input.addEventListener("blur", () => setTimeout(close, 100));
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "ArrowDown") { e.preventDefault(); if (ul.hidden) return open(); hi = Math.min(items.length - 1, hi + 1); draw(); }
+      else if (e.key === "ArrowUp") { e.preventDefault(); hi = Math.max(0, hi - 1); draw(); }
+      else if (e.key === "Escape" && !ul.hidden) { e.preventDefault(); e.stopPropagation(); close(); }
+      else if (e.key === "Enter") {
+        if (!ul.hidden && hi >= 0) { e.preventDefault(); choose(hi); }
+        else if (onEnterNoPick) { e.preventDefault(); onEnterNoPick(); }
+      }
+    });
+    return { open, close };
+  }
+
+  const tagCombo = combo(
+    $("#f-tags"),
+    $("#f-tags-suggest"),
+    (q) => {
+      const n = normTag(q);
+      const list = allTags().filter((t) => !draftTags.includes(t.value) && (!n || t.value.includes(n)));
+      if (n && !allTags().some((t) => t.value === n) && !draftTags.includes(n)) {
+        list.push({ value: n, label: `Add new tag “${esc(n)}”` });
+      }
+      return list.slice(0, 12);
+    },
+    (v) => addTag(v),
+    { onEnterNoPick: () => addTag($("#f-tags").value) }
+  );
+  $("#f-tags").addEventListener("keydown", (e) => {
+    if (e.key === ",") { e.preventDefault(); addTag($("#f-tags").value); tagCombo.open(); }
+    else if (e.key === "Backspace" && !$("#f-tags").value && draftTags.length) { draftTags.pop(); renderChips(); tagCombo.open(); }
+  });
+
+  combo(
+    $("#f-met"),
+    $("#f-met-suggest"),
+    (q) => {
+      const n = q.trim().toLowerCase();
+      return allMet().filter((m) => m.value.toLowerCase() !== n && (!n || m.value.toLowerCase().includes(n))).slice(0, 8);
+    },
+    (v) => { $("#f-met").value = v; }
+  );
+
   $("#f-place-find").addEventListener("click", findPlace);
   $("#f-place-q").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); findPlace(); } });
 
@@ -525,7 +632,8 @@
     const err = $("#form-error");
     if (!name) { err.textContent = "Add a name."; err.hidden = false; $("#f-name").focus(); return; }
     if (!draftPlace || !Number.isFinite(draftPlace.lat)) { err.textContent = "Choose where they are: search for a city or tap the map."; err.hidden = false; return; }
-    const tags = [...new Set($("#f-tags").value.split(",").map((t) => t.trim().toLowerCase()).filter(Boolean))];
+    addTag($("#f-tags").value);
+    const tags = [...draftTags];
     const base = editing || { id: uid(), addedAt: nowISO() };
     const c = {
       ...base,

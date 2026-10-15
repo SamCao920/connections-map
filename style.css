@@ -208,3 +208,28 @@ dialog hr { border: 0; border-top: 1px solid var(--line); margin: 18px 0 14px; }
 /* OSM tiles: soften in light mode, invert for dark mode */
 .tiles-light { filter: saturate(0.55) contrast(0.95); }
 .tiles-dark { filter: invert(1) hue-rotate(180deg) saturate(0.4) brightness(0.85) contrast(0.9); }
+
+/* Combobox */
+.combo { position: relative; }
+.suggest {
+  position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 20;
+  list-style: none; margin: 0; padding: 4px 0;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18); max-height: 240px; overflow-y: auto;
+}
+.suggest li { display: flex; justify-content: space-between; gap: 8px; padding: 6px 10px; cursor: pointer; font-size: 14px; }
+.suggest li[aria-selected="true"], .suggest li:hover { background: var(--paper); }
+.suggest .count { color: var(--muted); font-size: 12px; }
+.chips {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  background: var(--paper); border: 1px solid var(--line); border-radius: 6px; padding: 5px 6px; cursor: text;
+}
+.chips:focus-within { outline: 2px solid var(--cobalt); outline-offset: 2px; }
+#f-tags-chips { display: contents; }
+.chips input { border: 0; background: none; padding: 2px 3px; flex: 1; min-width: 120px; outline: none; }
+.chip {
+  display: inline-flex; align-items: center; gap: 2px;
+  background: var(--ink); color: var(--panel); border-radius: 999px; padding: 1px 4px 1px 9px; font-size: 13px;
+}
+.chip button { background: none; border: 0; color: inherit; cursor: pointer; padding: 0 4px; font-size: 15px; line-height: 1; }
+.combo > input { width: 100%; }

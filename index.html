@@ -86,12 +86,21 @@
 
         <div class="field">
           <label for="f-met">Where you met</label>
-          <input id="f-met" placeholder="Making Progress, Oct 2026" autocomplete="off">
+          <div class="combo">
+            <input id="f-met" placeholder="Making Progress, Oct 2026" autocomplete="off" role="combobox" aria-expanded="false" aria-controls="f-met-suggest" aria-autocomplete="list">
+            <ul id="f-met-suggest" class="suggest" role="listbox" hidden></ul>
+          </div>
         </div>
 
         <div class="field">
-          <label for="f-tags">Tags <span class="muted">(comma separated)</span></label>
-          <input id="f-tags" placeholder="econ, berkeley" autocomplete="off">
+          <label for="f-tags">Tags</label>
+          <div class="combo">
+            <div class="chips" id="f-tags-box">
+              <span id="f-tags-chips"></span>
+              <input id="f-tags" placeholder="Type or pick a tag" autocomplete="off" role="combobox" aria-expanded="false" aria-controls="f-tags-suggest" aria-autocomplete="list">
+            </div>
+            <ul id="f-tags-suggest" class="suggest" role="listbox" hidden></ul>
+          </div>
         </div>
 
         <div class="field">
