@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Connections Map</title>
+<meta name="description" content="A private map of the people you know, so you remember who to call when you're in their city.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='11' fill='%232443C9'/%3E%3Ccircle cx='16' cy='16' r='4' fill='white'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Public+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app">
+  <aside class="panel" id="panel">
+    <header class="panel-head">
+      <h1>Connections</h1>
+      <div class="head-actions">
+        <span class="sync" id="sync" role="status" aria-live="polite"></span>
+        <button class="icon-btn" id="settings-btn" aria-label="Settings" title="Settings">
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Zm8.6 2.2-1.8-.3a7 7 0 0 0-.7-1.7l1.1-1.5a.8.8 0 0 0-.1-1l-1.3-1.3a.8.8 0 0 0-1-.1l-1.5 1.1a7 7 0 0 0-1.7-.7l-.3-1.8a.8.8 0 0 0-.8-.7h-1.8a.8.8 0 0 0-.8.7l-.3 1.8a7 7 0 0 0-1.7.7L6.2 4.8a.8.8 0 0 0-1 .1L3.9 6.2a.8.8 0 0 0-.1 1l1.1 1.5a7 7 0 0 0-.7 1.7l-1.8.3a.8.8 0 0 0-.7.8v1.8c0 .4.3.7.7.8l1.8.3c.2.6.4 1.2.7 1.7l-1.1 1.5a.8.8 0 0 0 .1 1l1.3 1.3c.3.3.7.3 1 .1l1.5-1.1c.5.3 1.1.5 1.7.7l.3 1.8c.1.4.4.7.8.7h1.8c.4 0 .7-.3.8-.7l.3-1.8c.6-.2 1.2-.4 1.7-.7l1.5 1.1c.3.2.7.2 1-.1l1.3-1.3c.3-.3.3-.7.1-1l-1.1-1.5c.3-.5.5-1.1.7-1.7l1.8-.3c.4-.1.7-.4.7-.8v-1.8a.8.8 0 0 0-.7-.8Z"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <div id="local-banner" class="banner" hidden>
+      Saved in this browser only. <button class="link-btn" data-open-settings>Connect a private GitHub repo</button> to sync across devices.
+    </div>
+
+    <!-- List view -->
+    <section id="list-view" class="view">
+      <div class="near">
+        <form id="near-form" class="near-row">
+          <label for="near-input" class="visually-hidden">Find people near a place</label>
+          <input id="near-input" type="search" placeholder="Who’s near… (e.g. New York)" autocomplete="off">
+          <select id="near-radius" aria-label="Radius">
+            <option value="25">25 mi</option>
+            <option value="50" selected>50 mi</option>
+            <option value="100">100 mi</option>
+            <option value="250">250 mi</option>
+          </select>
+          <button type="submit" class="btn">Find</button>
+        </form>
+        <div id="near-result" class="near-result" hidden></div>
+      </div>
+
+      <div class="filters">
+        <label for="search" class="visually-hidden">Filter contacts</label>
+        <input id="search" type="search" placeholder="Filter by name, place, tag" autocomplete="off">
+        <label class="toggle"><input type="checkbox" id="show-expired" checked> Show expired</label>
+      </div>
+      <div id="tag-bar" class="tag-bar"></div>
+
+      <ul id="list" class="list"></ul>
+      <div id="empty" class="empty" hidden>
+        <p>No one on your map yet.</p>
+        <p class="muted">Add the first person you’d want to grab coffee with next time you’re in their city.</p>
+      </div>
+
+      <div class="list-foot">
+        <button class="btn primary wide" id="add-btn">Add a connection</button>
+      </div>
+    </section>
+
+    <!-- Edit view -->
+    <section id="edit-view" class="view" hidden>
+      <form id="edit-form" novalidate>
+        <h2 id="edit-title">Add a connection</h2>
+
+        <div class="field">
+          <label for="f-name">Name</label>
+          <input id="f-name" required autocomplete="off">
+        </div>
+
+        <div class="field">
+          <label for="f-place-q">Where they are</label>
+          <div class="place-row">
+            <input id="f-place-q" placeholder="City, e.g. Berkeley" autocomplete="off">
+            <button type="button" class="btn" id="f-place-find">Search</button>
+          </div>
+          <ul id="f-place-results" class="place-results" hidden></ul>
+          <p id="f-place-chosen" class="chosen muted">No place chosen. Search, or tap the map.</p>
+        </div>
+
+        <div class="field">
+          <label for="f-met">Where you met</label>
+          <input id="f-met" placeholder="Making Progress, Oct 2026" autocomplete="off">
+        </div>
+
+        <div class="field">
+          <label for="f-tags">Tags <span class="muted">(comma separated)</span></label>
+          <input id="f-tags" placeholder="econ, berkeley" autocomplete="off">
+        </div>
+
+        <div class="field">
+          <label for="f-reach">How to reach them</label>
+          <input id="f-reach" placeholder="email, phone, Instagram…" autocomplete="off">
+        </div>
+
+        <div class="field">
+          <label for="f-notes">Notes</label>
+          <textarea id="f-notes" rows="3" placeholder="What you talked about, what they’re working on"></textarea>
+        </div>
+
+        <fieldset class="field expiry">
+          <legend>Expiry</legend>
+          <p class="muted small">After this, they turn grey: you’re no longer sure they’re still there.</p>
+          <label class="radio"><input type="radio" name="exp-mode" value="none" checked> No expiry</label>
+          <label class="radio"><input type="radio" name="exp-mode" value="date"> Until
+            <select id="f-exp-month" aria-label="Month"></select>
+            <select id="f-exp-year" aria-label="Year"></select>
+          </label>
+          <label class="radio"><input type="radio" name="exp-mode" value="duration"> For
+            <input id="f-exp-n" type="number" min="1" max="99" value="4" aria-label="Amount">
+            <select id="f-exp-unit" aria-label="Unit">
+              <option value="years">years</option>
+              <option value="months">months</option>
+            </select>
+            <span class="muted small">from today</span>
+          </label>
+          <p id="f-exp-preview" class="muted small"></p>
+        </fieldset>
+
+        <p id="form-error" class="error" hidden></p>
+
+        <div class="form-actions">
+          <button type="submit" class="btn primary">Save connection</button>
+          <button type="button" class="btn" id="cancel-btn">Cancel</button>
+          <button type="button" class="btn danger" id="delete-btn" hidden>Delete</button>
+        </div>
+      </form>
+    </section>
+  </aside>
+
+  <main class="map-wrap">
+    <div id="map" aria-label="Map of connections"></div>
+    <div id="pick-hint" class="pick-hint" hidden>Tap the map to place this person</div>
+  </main>
+</div>
+
+<!-- Settings -->
+<dialog id="settings">
+  <form method="dialog" id="settings-form">
+    <h2>Sync with GitHub</h2>
+    <p class="muted small">Your contacts are saved as one JSON file in a <strong>private</strong> repo you own. The token stays in this browser and is only sent to GitHub.</p>
+
+    <div class="field">
+      <label for="s-repo">Data repo</label>
+      <input id="s-repo" placeholder="your-username/connections-data" autocomplete="off" spellcheck="false">
+    </div>
+    <div class="field">
+      <label for="s-path">File</label>
+      <input id="s-path" value="contacts.json" autocomplete="off" spellcheck="false">
+    </div>
+    <div class="field">
+      <label for="s-token">Fine-grained token</label>
+      <input id="s-token" type="password" autocomplete="off" spellcheck="false" placeholder="github_pat_…">
+    </div>
+    <details class="help">
+      <summary>How to make a token</summary>
+      <ol>
+        <li>Create a private repo for your data, e.g. <code>connections-data</code>.</li>
+        <li>Go to GitHub → Settings → Developer settings → Fine-grained tokens → Generate new token.</li>
+        <li>Repository access: <em>Only select repositories</em>, pick your data repo.</li>
+        <li>Permissions: Contents → <em>Read and write</em>. Nothing else.</li>
+        <li>Paste it here. Repeat on each device you use.</li>
+      </ol>
+    </details>
+
+    <p id="s-msg" class="small" role="status"></p>
+
+    <div class="form-actions">
+      <button type="button" class="btn primary" id="s-connect">Connect</button>
+      <button type="button" class="btn" id="s-disconnect">Disconnect</button>
+      <button type="submit" class="btn" value="close">Close</button>
+    </div>
+
+    <hr>
+    <h3>Backup</h3>
+    <div class="form-actions">
+      <button type="button" class="btn" id="s-export">Export JSON</button>
+      <label class="btn file-btn">Import JSON<input type="file" id="s-import" accept="application/json,.json" hidden></label>
+    </div>
+  </form>
+</dialog>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
