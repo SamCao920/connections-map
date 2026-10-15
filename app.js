@@ -489,6 +489,7 @@
     $("#f-place-results").hidden = true;
     $("#form-error").hidden = true;
     $("#delete-btn").hidden = !c;
+    disarmDelete();
 
     if (c?.expiresAt) {
       const last = new Date(new Date(c.expiresAt).getTime() - 1);
@@ -731,8 +732,20 @@
     closeEdit();
   });
   $("#cancel-btn").addEventListener("click", closeEdit);
-  $("#delete-btn").addEventListener("click", () => {
-    if (!editing || !confirm(`Delete ${editing.name}? This can't be undone.`)) return;
+  // Two-tap confirm in the page itself; native confirm() is blocked in some browsers.
+  function armConfirm(btn, label, armedLabel, action) {
+    let timer = null;
+    const disarm = () => { clearTimeout(timer); btn.dataset.armed = ""; btn.textContent = label; };
+    btn.addEventListener("click", () => {
+      if (btn.dataset.armed === "1") { disarm(); action(); return; }
+      btn.dataset.armed = "1";
+      btn.textContent = armedLabel;
+      timer = setTimeout(disarm, 4000);
+    });
+    return disarm;
+  }
+  const disarmDelete = armConfirm($("#delete-btn"), "Delete", "Tap again to delete", () => {
+    if (!editing) return;
     const i = data.contacts.findIndex((x) => x.id === editing.id);
     if (i >= 0) data.contacts[i] = { id: editing.id, deleted: true, updatedAt: nowISO() };
     save();
@@ -788,9 +801,8 @@
       msg.textContent = e.message;
     }
   });
-  $("#s-disconnect").addEventListener("click", () => {
+  armConfirm($("#s-disconnect"), "Disconnect", "Tap again to disconnect", () => {
     if (!connected()) return;
-    if (!confirm("Disconnect this browser? Your contacts stay safe in the GitHub repo; this browser forgets the token.")) return;
     settings = { repo: "", path: "contacts.json", token: "" };
     store.set(K.settings, settings);
     store.del(K.cache);
