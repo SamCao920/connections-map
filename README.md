@@ -51,4 +51,4 @@ The token is stored only in your browser and sent only to `api.github.com`. Anyo
 
 ## Credits
 
-Map: [Leaflet](https://leafletjs.com), tiles © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors © [CARTO](https://carto.com/attributions). Place search: [Nominatim](https://nominatim.org).
+Map: [Leaflet](https://leafletjs.com), tiles © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors. Place search: [Nominatim](https://nominatim.org).

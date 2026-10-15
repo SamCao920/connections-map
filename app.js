@@ -224,9 +224,10 @@
   // ---------- Map ----------
   const map = L.map("map", { worldCopyJump: true, zoomControl: true }).setView([30, -40], 2);
   const dark = matchMedia("(prefers-color-scheme: dark)").matches;
-  L.tileLayer(`https://{s}.basemaps.cartocdn.com/${dark ? "dark_all" : "light_all"}/{z}/{x}/{y}{r}.png`, {
-    maxZoom: 19, subdomains: "abcd",
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19,
+    className: dark ? "tiles-dark" : "tiles-light",
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
   }).addTo(map);
   const markerLayer = L.layerGroup().addTo(map);
   let nearCircle = null, draftMarker = null;
@@ -577,6 +578,10 @@
     const prev = settings;
     settings = { repo, path, token };
     try {
+      const meta = await fetch(`https://api.github.com/repos/${repo}`, { headers: ghHeaders() });
+      if (meta.status === 401) throw new Error("GitHub rejected the token. It may be expired or mistyped.");
+      if (!meta.ok) throw new Error(`Can't see ${repo}. Check the repo name and that the token has access to it.`);
+      if (!(await meta.json()).private) throw new Error(`${repo} is public, so your contacts would be visible to anyone. Use a private repo, e.g. your-username/connections-data.`);
       const r = await ghRead();
       data = r.data; sha = r.sha;
       // Carry over anything added while in browser-only mode.

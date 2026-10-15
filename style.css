@@ -204,3 +204,7 @@ dialog hr { border: 0; border-top: 1px solid var(--line); margin: 18px 0 14px; }
 @media (prefers-reduced-motion: reduce) {
   .leaflet-fade-anim .leaflet-popup, .leaflet-zoom-anim .leaflet-zoom-animated { transition: none !important; }
 }
+
+/* OSM tiles: soften in light mode, invert for dark mode */
+.tiles-light { filter: saturate(0.55) contrast(0.95); }
+.tiles-dark { filter: invert(1) hue-rotate(180deg) saturate(0.4) brightness(0.85) contrast(0.9); }
