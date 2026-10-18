@@ -29,6 +29,7 @@
   // ---------- State ----------
   let settings = store.get(K.settings, { repo: "", path: "contacts.json", token: "" });
   let data = emptyData();
+  let tripsData = null;    // { settings, trips } written by the trip-alert task
   let sha = null;          // GitHub blob sha of the file we last read
   let editing = null;      // contact being edited (copy) or null
   let draftPlace = null;   // place chosen in the edit form
@@ -129,6 +130,14 @@
     const parsed = JSON.parse(b64decode(j.content || "") || "{}");
     return { data: normalize(parsed), sha: j.sha };
   }
+  // trips.json sits next to the contacts file; the trip-alert task writes it.
+  async function ghReadTrips() {
+    const dir = (settings.path || "contacts.json").split("/").slice(0, -1);
+    const path = [...dir, "trips.json"].map(encodeURIComponent).join("/");
+    const res = await fetch(`https://api.github.com/repos/${settings.repo}/contents/${path}?t=${Date.now()}`, { headers: ghHeaders(), cache: "no-store" });
+    if (!res.ok) return null;
+    try { return JSON.parse(b64decode((await res.json()).content || "")); } catch { return null; }
+  }
   async function ghWrite(payload, prevSha) {
     const body = {
       message: `Update connections (${new Date().toISOString().slice(0, 16).replace("T", " ")})`,
@@ -183,6 +192,7 @@
       data = r.data; sha = r.sha;
       store.set(K.cache, { repo: settings.repo, data });
       setSync("Synced");
+      ghReadTrips().then((t) => { tripsData = t; renderAttention(); });
     } catch (e) {
       setSync(e.message, true);
     }
@@ -355,6 +365,7 @@
     }
 
     drawMarkers(nearFilter ? list : filtered());
+    renderAttention();
   }
 
   $("#list").addEventListener("click", (e) => {
@@ -386,21 +397,28 @@
     try {
       const [hit] = await geocode(q);
       if (!hit) { out.textContent = `Couldn't find “${q}”. Try a city name.`; return; }
-      const mi = +$("#near-radius").value;
-      nearFilter = { lat: hit.lat, lng: hit.lng, miles: mi, label: hit.label };
-      if (nearCircle) nearCircle.remove();
-      nearCircle = L.circle([hit.lat, hit.lng], { radius: mi * 1609.34, color: getCss("--cobalt"), weight: 1, fillOpacity: 0.06 }).addTo(map);
-      map.fitBounds(nearCircle.getBounds(), viewPad());
-      render();
-      const n = $("#list").querySelectorAll(".row").length;
-      const active = $("#list").querySelectorAll(".row:not(.expired)").length;
-      out.innerHTML = `${n ? `${active} current${n - active ? `, ${n - active} expired` : ""}` : "No one"} within ${mi} mi of <strong>${esc(hit.label)}</strong>. <button class="link-btn clear" type="button">Clear</button>`;
-      out.querySelector(".clear").addEventListener("click", clearNear);
+      setNear(hit, +$("#near-radius").value);
     } catch (err) {
       out.textContent = err.message;
     }
   });
-  $("#near-radius").addEventListener("change", () => { if (nearFilter) $("#near-form").requestSubmit(); });
+  function setNear(hit, mi, prefix = "") {
+    const out = $("#near-result");
+    out.hidden = false;
+    $("#near-input").value = hit.label.split(",")[0];
+    nearFilter = { lat: hit.lat, lng: hit.lng, miles: mi, label: hit.label };
+    if (nearCircle) nearCircle.remove();
+    nearCircle = L.circle([hit.lat, hit.lng], { radius: mi * 1609.34, color: getCss("--cobalt"), weight: 1, fillOpacity: 0.06 }).addTo(map);
+    map.fitBounds(nearCircle.getBounds(), viewPad());
+    render();
+    const n = $("#list").querySelectorAll(".row").length;
+    const active = $("#list").querySelectorAll(".row:not(.expired)").length;
+    out.innerHTML = `${prefix}${n ? `${active} current${n - active ? `, ${n - active} expired` : ""}` : "No one"} within ${mi} mi of <strong>${esc(hit.label)}</strong>. <button class="link-btn clear" type="button">Clear</button>`;
+    out.querySelector(".clear").addEventListener("click", clearNear);
+  }
+  $("#near-radius").addEventListener("change", () => {
+    if (nearFilter) setNear({ lat: nearFilter.lat, lng: nearFilter.lng, label: nearFilter.label }, +$("#near-radius").value);
+  });
   function clearNear() {
     nearFilter = null;
     $("#near-input").value = "";
@@ -841,6 +859,111 @@
     if (document.visibilityState === "visible" && $("#edit-view").hidden) {
       if (connected() && !saving && !dirty) load(); else render();
     }
+  });
+
+  // ---------- Needs attention: upcoming trips, expiry check-ins ----------
+  const DAY = 86400000;
+  const dismissedTrips = new Set(store.get("cm.dismissedTrips", []));
+  function fmtRange(a, b) {
+    const [ya, ma, da] = a.split("-").map(Number), [yb, mb, db] = (b || a).split("-").map(Number);
+    if (a === b || !b) return `${MONTHS[ma - 1]} ${da}`;
+    if (ma === mb && ya === yb) return `${MONTHS[ma - 1]} ${da} to ${db}`;
+    return `${MONTHS[ma - 1]} ${da} to ${MONTHS[mb - 1]} ${db}`;
+  }
+  function tripMatches(t) {
+    const r = tripsData?.settings?.radiusMiles || 50;
+    const at = new Date(t.start + "T12:00:00").getTime();
+    return live().filter((c) => c.place && !isExpired(c, at) && miles(t, c.place) <= r);
+  }
+  function upcomingTrips() {
+    const today = todayStr();
+    return (tripsData?.trips || [])
+      .filter((t) => (t.end || t.start) >= today && !dismissedTrips.has(t.id))
+      .map((t) => ({ t, people: tripMatches(t) }))
+      .filter((x) => x.people.length)
+      .sort((a, b) => a.t.start.localeCompare(b.t.start));
+  }
+  function needsCheckIn(c, now = Date.now()) {
+    if (!c.expiresAt || c.expiryAck === c.expiresAt) return false;
+    const t = new Date(c.expiresAt).getTime();
+    return t - now <= 30 * DAY && now - t <= 120 * DAY;
+  }
+  function renderAttention() {
+    const box = $("#attention");
+    if (!$("#edit-view").hidden) return;
+    const trips = upcomingTrips();
+    const checks = live().filter((c) => needsCheckIn(c)).sort((a, b) => a.expiresAt.localeCompare(b.expiresAt));
+    const html = [];
+    for (const { t, people } of trips) {
+      const names = people.slice(0, 3).map((c) => c.name.split(" ")[0]).join(", ") + (people.length > 3 ? ` +${people.length - 3}` : "");
+      html.push(`<li class="card trip" data-trip="${esc(t.id)}">
+        <button class="card-main" type="button" data-act="trip">
+          <span class="card-title">${esc(t.city)} · ${esc(fmtRange(t.start, t.end))}</span>
+          <span class="card-sub">${people.length} ${people.length === 1 ? "person" : "people"} there: ${esc(names)}</span>
+        </button>
+        <button class="card-x" type="button" data-act="dismiss-trip" aria-label="Dismiss trip to ${esc(t.city)}">×</button>
+      </li>`);
+    }
+    for (const c of checks) {
+      const city = (c.place?.label || "there").split(",")[0];
+      const expired = isExpired(c);
+      html.push(`<li class="card check" data-id="${esc(c.id)}">
+        <div class="card-main">
+          <span class="card-title">Is ${esc(c.name.split(" ")[0])} still in ${esc(city)}?</span>
+          <span class="card-sub">${expired ? "Expired" : "Expires"} ${esc(fmtMonth(new Date(new Date(c.expiresAt).getTime() - 1).toISOString()))}</span>
+          <span class="card-actions">
+            <button class="btn small" type="button" data-act="extend">Yes, +1 year</button>
+            <button class="btn small" type="button" data-act="moved">Moved</button>
+            <button class="btn small danger-text" type="button" data-act="remove">Remove</button>
+          </span>
+        </div>
+        <button class="card-x" type="button" data-act="ack" aria-label="Let it expire">×</button>
+      </li>`);
+    }
+    box.innerHTML = html.join("");
+    box.hidden = !html.length;
+  }
+  const removeArmed = new Map();
+  $("#attention").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-act]");
+    if (!b) return;
+    const card = b.closest(".card");
+    const act = b.dataset.act;
+    if (act === "trip") {
+      const t = tripsData.trips.find((x) => x.id === card.dataset.trip);
+      setNear({ lat: t.lat, lng: t.lng, label: t.city }, tripsData?.settings?.radiusMiles || 50, `Trip ${esc(fmtRange(t.start, t.end))}: `);
+      return;
+    }
+    if (act === "dismiss-trip") {
+      dismissedTrips.add(card.dataset.trip);
+      store.set("cm.dismissedTrips", [...dismissedTrips]);
+      renderAttention();
+      return;
+    }
+    const i = data.contacts.findIndex((x) => x.id === card.dataset.id);
+    if (i < 0) return;
+    const c = data.contacts[i];
+    if (act === "extend") {
+      const base = Math.max(Date.now(), new Date(c.expiresAt).getTime());
+      const d = new Date(base); d.setFullYear(d.getFullYear() + 1);
+      data.contacts[i] = { ...c, expiresAt: d.toISOString(), updatedAt: nowISO() };
+    } else if (act === "ack") {
+      data.contacts[i] = { ...c, expiryAck: c.expiresAt, updatedAt: nowISO() };
+    } else if (act === "moved") {
+      openEdit(c.id);
+      $("#f-place-q").focus();
+      return;
+    } else if (act === "remove") {
+      if (!removeArmed.get(c.id)) {
+        removeArmed.set(c.id, setTimeout(() => { removeArmed.delete(c.id); b.textContent = "Remove"; }, 4000));
+        b.textContent = "Tap again";
+        return;
+      }
+      clearTimeout(removeArmed.get(c.id)); removeArmed.delete(c.id);
+      data.contacts[i] = { id: c.id, deleted: true, updatedAt: nowISO() };
+    }
+    save();
+    render();
   });
 
   // ---------- Theme ----------
