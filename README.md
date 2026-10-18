@@ -6,6 +6,8 @@ A private map of the people you know, so that when you visit a city you remember
 - **Meeting log:** record each coffee or call with a date, where, and what you talked about. The list shows when you last met.
 - **Expiry:** give a connection an end date (“until March 2027”) or a duration (“for 4 years”). After that they turn grey: you are no longer sure they still live there.
 - **Who’s near:** type a city and a radius to list everyone within range, current people first.
+- **Trip alerts:** an optional daily task reads travel bookings from your email and calendar, writes them to `trips.json` in your data repo, and notifies you who lives near each destination. Upcoming trips show as cards at the top of the list.
+- **Expiry check-ins:** a month before someone expires, a card asks whether they’re still there (extend a year, mark moved, or remove).
 - **Import from Apple Contacts:** load a vCard export and tick who to add; addresses are placed on the map.
 - Light and dark mode, frosted-glass interface, works on phone and laptop.
 
