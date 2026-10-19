@@ -780,6 +780,7 @@
     $("#s-token").value = settings.token;
     $("#s-msg").textContent = connected() ? `Connected to ${settings.repo}.` : "Not connected. Contacts are saved in this browser only.";
     dlg.showModal();
+    refreshNotifStatus();
   }
   $("#settings-btn").addEventListener("click", openSettings);
   document.addEventListener("click", (e) => { if (e.target.closest("[data-open-settings]")) openSettings(); });
@@ -964,6 +965,152 @@
     }
     save();
     render();
+  });
+
+  // ---------- Trip notifications (web push) ----------
+  function dataPath(name) {
+    const dir = (settings.path || "contacts.json").split("/").slice(0, -1);
+    return [...dir, name].map(encodeURIComponent).join("/");
+  }
+  async function ghGetJSON(name) {
+    const res = await fetch(`https://api.github.com/repos/${settings.repo}/contents/${dataPath(name)}?t=${Date.now()}`, { headers: ghHeaders(), cache: "no-store" });
+    if (res.status === 404) return { json: null, sha: null };
+    if (!res.ok) throw new Error(`Couldn’t read ${name} (${res.status}).`);
+    const j = await res.json();
+    return { json: JSON.parse(b64decode(j.content || "") || "null"), sha: j.sha };
+  }
+  // Read-modify-write a JSON file in the data repo, retrying if another device or the Action wrote first.
+  async function ghUpdateJSON(name, mutate, message) {
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const { json, sha: fileSha } = await ghGetJSON(name);
+      const next = mutate(json);
+      const body = { message, content: b64encode(JSON.stringify(next, null, 2) + "\n") };
+      if (fileSha) body.sha = fileSha;
+      const res = await fetch(`https://api.github.com/repos/${settings.repo}/contents/${dataPath(name)}`, {
+        method: "PUT", headers: { ...ghHeaders(), "Content-Type": "application/json" }, body: JSON.stringify(body),
+      });
+      if (res.ok) return next;
+      if (res.status !== 409 && res.status !== 422) throw new Error(`Couldn’t save ${name} (${res.status}).`);
+    }
+    throw new Error(`Couldn’t save ${name}: it kept changing. Try again.`);
+  }
+  function b64urlToBytes(s) {
+    const b = atob(s.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((s.length + 3) % 4));
+    return Uint8Array.from(b, (c) => c.charCodeAt(0));
+  }
+  function deviceName() {
+    const ua = navigator.userAgent;
+    const os = /iPhone/.test(ua) ? "iPhone" : /iPad/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1) ? "iPad"
+      : /Macintosh/.test(ua) ? "Mac" : /Android/.test(ua) ? "Android" : /Windows/.test(ua) ? "Windows" : /Linux/.test(ua) ? "Linux" : "Device";
+    const br = /Edg\//.test(ua) ? "Edge" : /Firefox\//.test(ua) ? "Firefox" : /Chrome\//.test(ua) ? "Chrome" : /Safari\//.test(ua) ? "Safari" : "";
+    return br && os !== "iPhone" && os !== "iPad" ? `${os} ${br}` : os;
+  }
+  const isIOS = () => /iPhone|iPad/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
+  const standalone = () => matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+  const pushSupported = () => "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+
+  function nShow(state, text) {
+    $("#n-status").textContent = text;
+    $("#n-on").hidden = state === "on";
+    $("#n-test").hidden = state !== "on";
+    $("#n-off").hidden = state !== "on";
+  }
+  async function currentSub() {
+    if (!pushSupported()) return null;
+    const reg = await navigator.serviceWorker.getRegistration();
+    return reg ? reg.pushManager.getSubscription() : null;
+  }
+  async function refreshNotifStatus() {
+    if (!connected()) return nShow("off", "Connect your data repo above first.");
+    if (isIOS() && !standalone()) return nShow("off", "On iPhone: tap Share, then “Add to Home Screen”, open Connections from your home screen, and turn this on there.");
+    if (!pushSupported()) return nShow("off", "This browser can’t receive web notifications.");
+    if (Notification.permission === "denied") return nShow("off", "Notifications are blocked for this site. Allow them in your browser or system settings, then try again.");
+    try {
+      const { json } = await ghGetJSON("push.json");
+      $("#n-setup").hidden = !!json?.publicKey && !nKeyShown;
+      if (!json?.publicKey) return nShow("off", "Not set up yet.");
+      const sub = await currentSub();
+      if (!sub) return nShow("off", "Off on this device.");
+      const known = (json?.subscriptions || []).some((s) => s.endpoint === sub.endpoint);
+      nShow(known ? "on" : "off", known ? `On for this device (${deviceName()}).` : "Off on this device.");
+    } catch (e) { nShow("off", e.message); }
+  }
+  $("#n-on").addEventListener("click", async () => {
+    try {
+      if (!connected()) return refreshNotifStatus();
+      if (isIOS() && !standalone()) return refreshNotifStatus();
+      if (!pushSupported()) return refreshNotifStatus();
+      nShow("off", "Asking for permission…");
+      const perm = await Notification.requestPermission();
+      if (perm !== "granted") return refreshNotifStatus();
+      const { json: cfg } = await ghGetJSON("push.json");
+      if (!cfg?.publicKey) { $("#n-setup").hidden = false; return nShow("off", "Create a signing key first (below)."); }
+      const reg = await navigator.serviceWorker.register("sw.js");
+      await navigator.serviceWorker.ready;
+      let sub = await reg.pushManager.getSubscription();
+      if (sub && sub.options?.applicationServerKey) {
+        const k = new Uint8Array(sub.options.applicationServerKey);
+        const want = b64urlToBytes(cfg.publicKey);
+        if (k.length !== want.length || k.some((v, i) => v !== want[i])) { await sub.unsubscribe(); sub = null; }
+      }
+      if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64urlToBytes(cfg.publicKey) });
+      const j = sub.toJSON();
+      nShow("off", "Saving…");
+      await ghUpdateJSON("push.json", (p) => {
+        p = p || cfg;
+        const subs = (p.subscriptions || []).filter((s) => s.endpoint !== j.endpoint);
+        subs.push({ endpoint: j.endpoint, keys: j.keys, device: deviceName(), addedAt: nowISO() });
+        return { ...p, subscriptions: subs };
+      }, `Notifications on: ${deviceName()}`);
+      await refreshNotifStatus();
+    } catch (e) { nShow("off", `Couldn’t turn on notifications: ${e.message}`); }
+  });
+  // Create a VAPID key pair in the browser. Only the public half is stored in the repo.
+  let nKeyShown = false;
+  const bytesToB64url = (u8) => btoa(String.fromCharCode(...u8)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  $("#n-genkey").addEventListener("click", async () => {
+    try {
+      const { json: existing } = await ghGetJSON("push.json");
+      if (existing?.publicKey && $("#n-genkey").dataset.armed !== "1") {
+        $("#n-genkey").dataset.armed = "1";
+        $("#n-genkey").textContent = "Replace key? Tap again";
+        return;
+      }
+      const kp = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]);
+      const pub = new Uint8Array(await crypto.subtle.exportKey("raw", kp.publicKey));
+      const priv = (await crypto.subtle.exportKey("jwk", kp.privateKey)).d; // already base64url
+      await ghUpdateJSON("push.json", (p) => ({ subject: "mailto:noreply@example.com", ...(p || {}), publicKey: bytesToB64url(pub), subscriptions: [] }), "Set up notification key");
+      $("#n-key").value = priv;
+      $("#n-secret-link").href = `https://github.com/${settings.repo}/settings/secrets/actions/new`;
+      $("#n-keybox").hidden = false;
+      $("#n-genkey").hidden = true;
+      nKeyShown = true;
+      nShow("off", "Key created. Finish the steps below.");
+    } catch (e) { nShow("off", `Couldn’t create the key: ${e.message}`); }
+  });
+  $("#n-copy").addEventListener("click", async () => {
+    try { await navigator.clipboard.writeText($("#n-key").value); $("#n-copy").textContent = "Copied"; }
+    catch { $("#n-key").select(); }
+  });
+  $("#n-test").addEventListener("click", async () => {
+    try {
+      $("#n-status").textContent = "Sending…";
+      await ghUpdateJSON("trips.json", (t) => {
+        t = t || { version: 1, trips: [] };
+        t.outbox = [...(t.outbox || []), { id: `test-${Date.now()}`, title: "Connections", body: "Test notification. Trip alerts will look like this.", url: location.href.split("#")[0] }];
+        return t;
+      }, "Test notification");
+      $("#n-status").textContent = "Sent. It should arrive within a minute or two.";
+    } catch (e) { $("#n-status").textContent = e.message; }
+  });
+  $("#n-off").addEventListener("click", async () => {
+    try {
+      const sub = await currentSub();
+      const endpoint = sub?.endpoint;
+      if (sub) await sub.unsubscribe();
+      if (endpoint) await ghUpdateJSON("push.json", (p) => ({ ...p, subscriptions: (p?.subscriptions || []).filter((s) => s.endpoint !== endpoint) }), `Notifications off: ${deviceName()}`);
+      await refreshNotifStatus();
+    } catch (e) { $("#n-status").textContent = e.message; }
   });
 
   // ---------- Theme ----------

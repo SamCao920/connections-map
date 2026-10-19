@@ -10,6 +10,12 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Connections">
+<meta name="theme-color" content="#2443c9">
 <link rel="stylesheet" href="style.css">
 <link rel="stylesheet" href="glass.css">
 <script>
@@ -209,6 +215,30 @@
       <button type="button" class="btn primary" id="s-connect">Connect</button>
       <button type="button" class="btn" id="s-disconnect">Disconnect</button>
       <button type="submit" class="btn" value="close">Close</button>
+    </div>
+
+    <hr>
+    <h3>Trip notifications</h3>
+    <p class="muted small">Get a notification from this site when you book a trip to a city where people on your map live. Turn it on separately on each device.</p>
+    <p id="n-status" class="small" role="status"></p>
+    <div id="n-setup" class="n-setup" hidden>
+      <p class="small"><strong>One-time setup.</strong> Create a signing key. Your browser makes it; it is never sent anywhere except where you paste it.</p>
+      <div class="form-actions"><button type="button" class="btn" id="n-genkey">Create key</button></div>
+      <div id="n-keybox" hidden>
+        <ol class="small n-steps">
+          <li>Copy this private key:
+            <div class="key-row"><input id="n-key" readonly spellcheck="false" aria-label="Private key"><button type="button" class="btn small" id="n-copy">Copy</button></div>
+          </li>
+          <li>Open <a id="n-secret-link" target="_blank" rel="noopener">your data repo’s Actions secrets</a>, name the secret <code>VAPID_PRIVATE_KEY</code>, paste, and save.</li>
+          <li>Come back and tap “Turn on for this device”.</li>
+        </ol>
+        <p class="muted small">This key is shown only now. If you lose it, create a new one; every device then has to turn notifications on again.</p>
+      </div>
+    </div>
+    <div class="form-actions">
+      <button type="button" class="btn primary" id="n-on">Turn on for this device</button>
+      <button type="button" class="btn" id="n-test" hidden>Send a test</button>
+      <button type="button" class="btn" id="n-off" hidden>Turn off</button>
     </div>
 
     <hr>

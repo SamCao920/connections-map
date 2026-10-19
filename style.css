@@ -288,3 +288,9 @@ button.card-main { cursor: pointer; }
 .danger-text { color: var(--danger); }
 .card-x { background: none; border: 0; color: var(--muted); font-size: 17px; line-height: 1; padding: 10px 12px 6px 4px; cursor: pointer; }
 .card-x:hover { color: var(--ink); }
+
+/* Notification setup */
+.n-setup { margin: 8px 0 10px; padding: 10px 12px; border-radius: 14px; border: 1px dashed var(--glass-edge, var(--line)); }
+.n-steps { padding-left: 18px; margin: 8px 0; display: grid; gap: 8px; }
+.key-row { display: flex; gap: 6px; margin-top: 4px; }
+.key-row input { flex: 1; min-width: 0; font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
