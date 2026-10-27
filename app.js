@@ -32,7 +32,7 @@
   let tripsData = null;    // { settings, trips } written by the trip-alert task
   let sha = null;          // GitHub blob sha of the file we last read
   let editing = null;      // contact being edited (copy) or null
-  let draftPlace = null;   // place chosen in the edit form
+  let draftPlaces = [];    // places chosen in the edit form (may be empty)
   let activeTags = new Set();
   let nearFilter = null;   // { lat, lng, miles, label }
 
@@ -62,6 +62,14 @@
     const h = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * toR) * Math.cos(b.lat * toR) * Math.sin(dLng / 2) ** 2;
     return 2 * R * Math.asin(Math.sqrt(h));
   }
+  // A contact has zero or more places. Older data stored a single `place`; normalize() converts it.
+  const placesOf = (c) => c.places || [];
+  const nearestMiles = (pt, c) => Math.min(Infinity, ...placesOf(c).map((p) => miles(pt, p)));
+  const shortName = (p) => p.label.split(",")[0];
+  const placesText = (c) => {
+    const ps = placesOf(c);
+    return ps.length === 1 ? ps[0].label : ps.map(shortName).join(" + ");
+  };
   let lastGeocode = 0;
   async function geocode(q) {
     // Nominatim asks for at most 1 request per second.
@@ -152,9 +160,14 @@
     return { sha: j.content.sha };
   }
 
+  function fixContact(c) {
+    if (c.deleted || Array.isArray(c.places)) return c;
+    const { place, ...rest } = c;
+    return { ...rest, places: place && Number.isFinite(place.lat) && Number.isFinite(place.lng) ? [place] : [] };
+  }
   function normalize(d) {
     const out = emptyData();
-    if (d && Array.isArray(d.contacts)) out.contacts = d.contacts.filter((c) => c && c.id);
+    if (d && Array.isArray(d.contacts)) out.contacts = d.contacts.filter((c) => c && c.id).map(fixContact);
     if (d && d.updatedAt) out.updatedAt = d.updatedAt;
     return out;
   }
@@ -239,7 +252,7 @@
   }).addTo(map);
   const markerLayer = L.layerGroup().addTo(map);
   window.cmMap = map; // handy for debugging from the console
-  let nearCircle = null, draftMarker = null;
+  let nearCircle = null;
 
   function pinIcon(count, cls) {
     const size = count > 1 ? 30 : 22;
@@ -255,19 +268,26 @@
   function drawMarkers(contacts) {
     markerLayer.clearLayers();
     const groups = new Map();
+    // One pin per place; a person with several places appears at each of them.
     for (const c of contacts) {
-      if (!c.place) continue;
-      const key = `${c.place.lat.toFixed(2)},${c.place.lng.toFixed(2)}`;
-      if (!groups.has(key)) groups.set(key, []);
-      groups.get(key).push(c);
+      for (const p of placesOf(c)) {
+        const key = `${p.lat.toFixed(2)},${p.lng.toFixed(2)}`;
+        if (!groups.has(key)) groups.set(key, { place: p, list: [] });
+        const g = groups.get(key);
+        if (!g.list.includes(c)) g.list.push(c);
+      }
     }
-    for (const list of groups.values()) {
+    for (const { place, list } of groups.values()) {
       const exp = list.filter((c) => isExpired(c)).length;
       const cls = exp === list.length ? "expired" : exp > 0 ? "mixed" : "";
-      const { lat, lng, label } = list[0].place;
+      const { lat, lng, label } = place;
       const items = list
         .slice().sort((a, b) => a.name.localeCompare(b.name))
-        .map((c) => `<li class="${isExpired(c) ? "expired" : ""}"><button data-id="${esc(c.id)}">${esc(c.name)}</button></li>`)
+        .map((c) => {
+          const others = placesOf(c).filter((p) => p.label !== label && miles(p, place) > 5).map(shortName);
+          const also = others.length ? `<span class="pop-also">also ${esc(others.join(", "))}</span>` : "";
+          return `<li class="${isExpired(c) ? "expired" : ""}"><button data-id="${esc(c.id)}">${esc(c.name)}</button>${also}</li>`;
+        })
         .join("");
       const m = L.marker([lat, lng], { icon: pinIcon(list.length, cls), keyboard: true, title: list.map((c) => c.name).join(", ") });
       m.bindPopup(`<div class="pop-place">${esc(label)}</div><ul class="pop-list">${items}</ul>`);
@@ -284,9 +304,10 @@
   map.on("click", async (e) => {
     if ($("#edit-view").hidden) return;
     const { lat, lng } = e.latlng.wrap();
-    setDraftPlace({ lat, lng, label: "Looking up place…" });
-    const label = await reverseGeocode(lat, lng);
-    if (draftPlace && draftPlace.lat === lat && draftPlace.lng === lng) setDraftPlace({ lat, lng, label });
+    const p = { lat, lng, label: "Looking up place…" };
+    addDraftPlace(p);
+    p.label = await reverseGeocode(lat, lng);
+    renderDraftPlaces();
   });
 
   // The floating panel covers the left 400px on wide screens and the bottom half on phones.
@@ -302,7 +323,7 @@
     map.setView(map.unproject(pt, zoom), zoom);
   }
   function fitTo(contacts) {
-    const pts = contacts.filter((c) => c.place).map((c) => [c.place.lat, c.place.lng]);
+    const pts = contacts.flatMap((c) => placesOf(c).map((p) => [p.lat, p.lng]));
     if (pts.length === 1) centerOn(pts[0], 9);
     else if (pts.length > 1) map.fitBounds(pts, { ...viewPad(), maxZoom: 9 });
   }
@@ -315,7 +336,7 @@
       if (!showExp && isExpired(c)) return false;
       if (activeTags.size && !(c.tags || []).some((t) => activeTags.has(t))) return false;
       if (q) {
-        const hay = [c.name, c.place?.label, c.met, c.notes, ...(c.tags || []), ...(c.meetings || []).flatMap((m) => [m.where, m.note])].join(" ").toLowerCase();
+        const hay = [c.name, ...placesOf(c).map((p) => p.label), c.met, c.notes, ...(c.tags || []), ...(c.meetings || []).flatMap((m) => [m.where, m.note])].join(" ").toLowerCase();
         if (!hay.includes(q)) return false;
       }
       return true;
@@ -334,8 +355,7 @@
     let list = filtered();
     if (nearFilter) {
       list = list
-        .filter((c) => c.place)
-        .map((c) => ({ c, d: miles(nearFilter, c.place) }))
+        .map((c) => ({ c, d: nearestMiles(nearFilter, c) }))
         .filter((x) => x.d <= nearFilter.miles)
         .sort((a, b) => isExpired(a.c) - isExpired(b.c) || a.d - b.d)
         .map((x) => x.c);
@@ -347,9 +367,10 @@
     $("#list").innerHTML = list
       .map((c) => {
         const exp = isExpired(c);
-        const dist = nearFilter && c.place ? ` · ${Math.round(miles(nearFilter, c.place))} mi` : "";
-        const meta = [c.place?.label || "No location yet", c.met].filter(Boolean).map(esc).join(" · ");
-        return `<li class="row ${exp ? "expired" : ""} ${c.place ? "" : "unplaced"}" tabindex="0" data-id="${esc(c.id)}">
+        const placed = placesOf(c).length > 0;
+        const dist = nearFilter && placed ? ` · ${Math.round(nearestMiles(nearFilter, c))} mi` : "";
+        const meta = [placed ? placesText(c) : "No location", c.met].filter(Boolean).map(esc).join(" · ");
+        return `<li class="row ${exp ? "expired" : ""} ${placed ? "" : "unplaced"}" tabindex="0" data-id="${esc(c.id)}">
           <span class="dot" aria-hidden="true"></span>
           <div>
             <div class="name">${esc(c.name)}</div>
@@ -463,21 +484,34 @@
     });
   });
 
-  function setDraftPlace(p) {
-    draftPlace = p;
-    const el = $("#f-place-chosen");
-    if (p) {
-      el.textContent = p.label;
-      el.classList.add("set");
-      if (draftMarker) draftMarker.remove();
-      draftMarker = L.marker([p.lat, p.lng], { icon: pinIcon(1, "draft"), interactive: false }).addTo(map);
-      centerOn([p.lat, p.lng], Math.max(map.getZoom(), 6));
-    } else {
-      el.textContent = "No place chosen. Search, or tap the map.";
-      el.classList.remove("set");
-      if (draftMarker) { draftMarker.remove(); draftMarker = null; }
-    }
+  // The form edits a list of places; each shows as a chip and a draft pin on the map.
+  let draftMarkers = [];
+  function renderDraftPlaces() {
+    $("#f-places").innerHTML = draftPlaces
+      .map((p, i) => `<li class="chip">${esc(p.label)}<button type="button" data-i="${i}" aria-label="Remove ${esc(p.label)}">×</button></li>`)
+      .join("");
+    const hint = $("#f-place-chosen");
+    hint.textContent = draftPlaces.length
+      ? "Add another place if they split their time, or tap the map."
+      : "Optional. Leave empty for someone you only reach online. Search, or tap the map.";
+    draftMarkers.forEach((m) => m.remove());
+    draftMarkers = draftPlaces.map((p) => L.marker([p.lat, p.lng], { icon: pinIcon(1, "draft"), interactive: false }).addTo(map));
   }
+  function addDraftPlace(p) {
+    draftPlaces.push(p);
+    renderDraftPlaces();
+    centerOn([p.lat, p.lng], Math.max(map.getZoom(), 6));
+  }
+  function setDraftPlaces(list) {
+    draftPlaces = list.map((p) => ({ ...p }));
+    renderDraftPlaces();
+  }
+  $("#f-places").addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-i]");
+    if (!b) return;
+    draftPlaces.splice(+b.dataset.i, 1);
+    renderDraftPlaces();
+  });
 
   function showView(which) {
     $("#list-view").hidden = which !== "list";
@@ -524,7 +558,12 @@
       setExpMode("none");
     }
     updateExpPreview();
-    setDraftPlace(c?.place || null);
+    setDraftPlaces(c ? placesOf(c) : []);
+    if (draftPlaces.length) {
+      const pts = draftPlaces.map((p) => [p.lat, p.lng]);
+      if (pts.length === 1) centerOn(pts[0], Math.max(map.getZoom(), 6));
+      else map.fitBounds(pts, { ...viewPad(), maxZoom: 6 });
+    }
     showView("edit");
     $("#edit-view").scrollTop = 0;
     if (!c) $("#f-name").focus({ preventScroll: true });
@@ -532,7 +571,7 @@
 
   function closeEdit() {
     editing = null;
-    setDraftPlace(null);
+    setDraftPlaces([]);
     showView("list");
     render();
   }
@@ -548,7 +587,9 @@
       if (!hits.length) { ul.innerHTML = `<li><button type="button" disabled>No matches. Try a city name.</button></li>`; return; }
       ul.innerHTML = hits.map((h, i) => `<li><button type="button" data-i="${i}">${esc(h.label)}</button></li>`).join("");
       ul.querySelectorAll("button[data-i]").forEach((b) => b.addEventListener("click", () => {
-        setDraftPlace(hits[+b.dataset.i]);
+        const h = hits[+b.dataset.i];
+        if (!draftPlaces.some((p) => Math.abs(p.lat - h.lat) < 0.01 && Math.abs(p.lng - h.lng) < 0.01)) addDraftPlace(h);
+        $("#f-place-q").value = "";
         ul.hidden = true;
       }));
     } catch (e) {
@@ -728,14 +769,14 @@
     const name = $("#f-name").value.trim();
     const err = $("#form-error");
     if (!name) { err.textContent = "Add a name."; err.hidden = false; $("#f-name").focus(); return; }
-    if (!draftPlace || !Number.isFinite(draftPlace.lat)) { err.textContent = "Choose where they are: search for a city or tap the map."; err.hidden = false; return; }
+    if (draftPlaces.some((p) => p.label === "Looking up place…")) { err.textContent = "Still looking up a place. Try again in a second."; err.hidden = false; return; }
     addTag($("#f-tags").value);
     const tags = [...draftTags];
-    const base = editing || { id: uid(), addedAt: nowISO() };
+    const { place: _legacy, ...base } = editing || { id: uid(), addedAt: nowISO() };
     const c = {
       ...base,
       name,
-      place: { label: draftPlace.label, lat: +draftPlace.lat.toFixed(5), lng: +draftPlace.lng.toFixed(5) },
+      places: draftPlaces.map((p) => ({ label: p.label, lat: +p.lat.toFixed(5), lng: +p.lng.toFixed(5) })),
       met: $("#f-met").value.trim(),
       tags,
       reach: $("#f-reach").value.trim(),
@@ -874,7 +915,7 @@
   function tripMatches(t) {
     const r = tripsData?.settings?.radiusMiles || 50;
     const at = new Date(t.start + "T12:00:00").getTime();
-    return live().filter((c) => c.place && !isExpired(c, at) && miles(t, c.place) <= r);
+    return live().filter((c) => !isExpired(c, at) && nearestMiles(t, c) <= r);
   }
   function upcomingTrips() {
     const today = todayStr();
@@ -885,7 +926,8 @@
       .sort((a, b) => a.t.start.localeCompare(b.t.start));
   }
   function needsCheckIn(c, now = Date.now()) {
-    if (!c.expiresAt || c.expiryAck === c.expiresAt) return false;
+    // "Still there?" only makes sense for someone pinned somewhere.
+    if (!c.expiresAt || c.expiryAck === c.expiresAt || !placesOf(c).length) return false;
     const t = new Date(c.expiresAt).getTime();
     return t - now <= 30 * DAY && now - t <= 120 * DAY;
   }
@@ -906,7 +948,7 @@
       </li>`);
     }
     for (const c of checks) {
-      const city = (c.place?.label || "there").split(",")[0];
+      const city = placesOf(c).map(shortName).join(" or ");
       const expired = isExpired(c);
       html.push(`<li class="card check" data-id="${esc(c.id)}">
         <div class="card-main">
@@ -1227,7 +1269,7 @@
       const now = nowISO();
       data.contacts.push({
         id: uid(), name: c.name,
-        place: place ? { label: place.label, lat: +place.lat.toFixed(5), lng: +place.lng.toFixed(5) } : null,
+        places: place ? [{ label: place.label, lat: +place.lat.toFixed(5), lng: +place.lng.toFixed(5) }] : [],
         met: "", tags: ["imported"],
         reach: [...c.emails, ...c.phones].join(", "),
         notes: "", meetings: [], expiresAt: null, addedAt: now, updatedAt: now,

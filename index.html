@@ -96,12 +96,13 @@
 
         <div class="field">
           <label for="f-place-q">Where they are</label>
+          <ul id="f-places" class="place-chips"></ul>
           <div class="place-row">
-            <input id="f-place-q" placeholder="City, e.g. Berkeley" autocomplete="off">
+            <input id="f-place-q" placeholder="Add a city, e.g. Berkeley" autocomplete="off">
             <button type="button" class="btn" id="f-place-find">Search</button>
           </div>
           <ul id="f-place-results" class="place-results" hidden></ul>
-          <p id="f-place-chosen" class="chosen muted">No place chosen. Search, or tap the map.</p>
+          <p id="f-place-chosen" class="chosen muted"></p>
         </div>
 
         <div class="field">

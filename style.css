@@ -230,6 +230,10 @@ dialog hr { border: 0; border-top: 1px solid var(--line); margin: 18px 0 14px; }
 }
 .chip button { background: none; border: 0; color: inherit; cursor: pointer; padding: 0 4px; font-size: 15px; line-height: 1; }
 .combo > input { width: 100%; }
+.place-chips { list-style: none; margin: 0 0 8px; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.place-chips:empty { display: none; }
+.place-chips .chip { padding: 3px 4px 3px 10px; }
+.pop-also { font-size: 11px; color: var(--muted); margin-left: 4px; }
 
 /* Meeting log */
 .field-label { display: block; font-weight: 600; font-size: 13px; margin-bottom: 4px; }

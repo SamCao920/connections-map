@@ -2,7 +2,7 @@
 
 A private map of the people you know, so that when you visit a city you remember who lives there and can reach out for coffee.
 
-- Pin each connection to a city, with where you met, tags, and how to reach them.
+- Pin each connection to a city, with where you met, tags, and how to reach them. A connection can have **several places** (one pin each, for someone who splits their time) or **none** (someone you only email; they show in the list as “No location”).
 - **Meeting log:** record each coffee or call with a date, where, and what you talked about. The list shows when you last met.
 - **Expiry:** give a connection an end date (“until March 2027”) or a duration (“for 4 years”). After that they turn grey: you are no longer sure they still live there.
 - **Who’s near:** type a city and a radius to list everyone within range, current people first.
@@ -38,7 +38,7 @@ The token is stored only in your browser and sent only to `api.github.com`. Anyo
     {
       "id": "uuid",
       "name": "Alice Chen",
-      "place": { "label": "Berkeley, California, United States", "lat": 37.8715, "lng": -122.273 },
+      "places": [{ "label": "Berkeley, California, United States", "lat": 37.8715, "lng": -122.273 }],
       "met": "Making Progress, Oct 2026",
       "tags": ["making progress"],
       "reach": "alice@example.com",
@@ -52,6 +52,8 @@ The token is stored only in your browser and sent only to `api.github.com`. Anyo
   ]
 }
 ```
+
+`places` can hold any number of entries, including none. Older files with a single `place` still load and are converted when you next save.
 
 `expiresAt` is the first moment the contact counts as expired (`null` for no expiry). Deleted contacts are kept as `{ "id", "deleted": true, "updatedAt" }` so deletions sync across devices.
 
