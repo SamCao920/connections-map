@@ -65,7 +65,7 @@
   // A contact has zero or more places. Older data stored a single `place`; normalize() converts it.
   const placesOf = (c) => c.places || [];
   const nearestMiles = (pt, c) => Math.min(Infinity, ...placesOf(c).map((p) => miles(pt, p)));
-  const shortName = (p) => p.label.split(",")[0];
+  const shortName = (p) => p.label.split(",")[0].replace(/^(City|Town|Village) of /, "");
   const placesText = (c) => {
     const ps = placesOf(c);
     return ps.length === 1 ? ps[0].label : ps.map(shortName).join(" + ");
@@ -351,6 +351,7 @@
     $("#tag-bar").innerHTML = tags
       .map((t) => `<button class="tag" aria-pressed="${activeTags.has(t)}" data-tag="${esc(t)}">${esc(t)}</button>`)
       .join("");
+    renderTagsHead(tags.length);
 
     let list = filtered();
     if (nearFilter) {
@@ -397,6 +398,22 @@
     const row = e.target.closest(".row");
     if (row && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); openEdit(row.dataset.id); }
   });
+  // Tags can be collapsed; the choice is remembered in this browser.
+  let tagsOpen = store.get("cm.tagsOpen", true) !== false;
+  function renderTagsHead(n) {
+    $("#tags-head").hidden = n === 0;
+    $("#tag-bar").hidden = n === 0 || !tagsOpen;
+    $("#tags-toggle").setAttribute("aria-expanded", String(tagsOpen));
+    const on = activeTags.size;
+    $("#tags-label").textContent = `Tags (${n})${on ? ` · ${on} selected` : ""}`;
+    $("#tags-clear").hidden = !on;
+  }
+  $("#tags-toggle").addEventListener("click", () => {
+    tagsOpen = !tagsOpen;
+    store.set("cm.tagsOpen", tagsOpen);
+    render();
+  });
+  $("#tags-clear").addEventListener("click", () => { activeTags.clear(); render(); });
   $("#tag-bar").addEventListener("click", (e) => {
     const b = e.target.closest(".tag");
     if (!b) return;
@@ -1284,6 +1301,108 @@
     $("#vcf-msg").textContent = `Added ${todo.length}. They’re tagged “imported” so you can find and tidy them.`;
     btn.disabled = false;
     drawVcf();
+  });
+
+  // ---------- Statistics ----------
+  function statsHTML() {
+    const all = live();
+    if (!all.length) return `<p class="muted">Nothing to count yet. Add a few people first.</p>`;
+    const cur = all.filter((c) => !isExpired(c));
+    const n = (x) => x.toLocaleString("en-US");
+    const tile = (num, label) => `<div class="tile"><b>${esc(num)}</b><span>${esc(label)}</span></div>`;
+    const bars = (rows) => {
+      const max = Math.max(1, ...rows.map((r) => r[1]));
+      return `<ul class="bars">${rows.map(([l, v]) => `<li><span class="b-l" title="${esc(l)}">${esc(l)}</span><span class="b-t"><i style="width:${Math.max(4, Math.round((v / max) * 100))}%"></i></span><span class="b-n">${v}</span></li>`).join("")}</ul>`;
+    };
+    const top = (map, k) => [...map.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, k);
+    const bump = (map, key, id) => { if (!map.has(key)) map.set(key, new Set()); map.get(key).add(id); };
+    const sizes = (m) => new Map([...m].map(([k, v]) => [k, v.size]));
+
+    // Geography: current people only (expired pins are uncertain).
+    const countryOf = (p) => {
+      const parts = p.label.split(",").map((x) => x.trim());
+      const last = parts[parts.length - 1];
+      return parts.length > 1 && !/^[-\d.\s]+$/.test(last) ? last : null;
+    };
+    const cities = new Map(), countries = new Map(), pts = [];
+    for (const c of cur) for (const p of placesOf(c)) {
+      bump(cities, shortName(p), c.id);
+      const k = countryOf(p);
+      if (k) bump(countries, k, c.id);
+      pts.push({ c, p });
+    }
+
+    // Meetings
+    const meetings = all.flatMap((c) => (c.meetings || []).filter((m) => !m.legacy && m.date).map((m) => ({ c, date: m.date })));
+    const yearAgo = new Date(); yearAgo.setFullYear(yearAgo.getFullYear() - 1);
+    const yearAgoStr = `${yearAgo.getFullYear()}-${String(yearAgo.getMonth() + 1).padStart(2, "0")}-${String(yearAgo.getDate()).padStart(2, "0")}`;
+    const recent = meetings.filter((m) => m.date >= yearAgoStr).length;
+    const met = all.filter((c) => meetCount(c) > 0);
+    const neverMet = cur.filter((c) => meetCount(c) === 0);
+    const stale = cur.filter((c) => lastMet(c) && lastMet(c) < yearAgoStr);
+
+    // Highlights
+    const facts = [];
+    let far = null;
+    for (let i = 0; i < pts.length; i++) for (let j = i + 1; j < pts.length; j++) {
+      if (pts[i].c.id === pts[j].c.id) continue;
+      const d = miles(pts[i].p, pts[j].p);
+      if (!far || d > far.d) far = { d, a: pts[i], b: pts[j] };
+    }
+    if (far && far.d > 50) facts.push(`Farthest apart: ${esc(far.a.c.name)} (${esc(shortName(far.a.p))}) and ${esc(far.b.c.name)} (${esc(shortName(far.b.p))}), ${n(Math.round(far.d))} miles.`);
+    const home = tripsData?.settings?.homes?.[0];
+    if (home) {
+      const r = tripsData.settings.radiusMiles || 50;
+      const nearHome = cur.filter((c) => nearestMiles(home, c) <= r);
+      facts.push(`${nearHome.length} current ${nearHome.length === 1 ? "person is" : "people are"} within ${r} miles of ${esc(home.label)}.`);
+    }
+    const mostMet = met.slice().sort((a, b) => meetCount(b) - meetCount(a))[0];
+    if (mostMet && meetCount(mostMet) > 1) facts.push(`Most met: ${esc(mostMet.name)}, ${meetCount(mostMet)} times.`);
+    const longest = cur.filter((c) => lastMet(c)).sort((a, b) => lastMet(a).localeCompare(lastMet(b)))[0];
+    if (longest) facts.push(`Longest since you met: ${esc(longest.name)}, ${esc(agoText(lastMet(longest)))}.`);
+    const multi = cur.filter((c) => placesOf(c).length > 1).length;
+    if (multi) facts.push(`${multi} ${multi === 1 ? "person has" : "people have"} more than one place.`);
+    const upcoming = upcomingTrips();
+    if (upcoming.length) facts.push(`${upcoming.length} upcoming ${upcoming.length === 1 ? "trip" : "trips"} with someone to see.`);
+    const soon = cur.filter((c) => c.expiresAt && new Date(c.expiresAt).getTime() - Date.now() <= 365 * DAY).length;
+    if (soon) facts.push(`${soon} ${soon === 1 ? "person expires" : "people expire"} within a year.`);
+
+    // How you know them
+    const mets = new Map();
+    for (const c of all) { const m = (c.met || "").trim(); if (m) bump(mets, m.toLowerCase(), c.id); }
+    const metLabel = new Map(); for (const c of all) { const m = (c.met || "").trim(); if (m && !metLabel.has(m.toLowerCase())) metLabel.set(m.toLowerCase(), m); }
+    const tags = new Map();
+    for (const c of all) for (const t of c.tags || []) bump(tags, t, c.id);
+    const years = new Map();
+    for (const c of cur) { const y = c.expiresAt ? String(new Date(new Date(c.expiresAt).getTime() - 1).getFullYear()) : "No expiry"; bump(years, y, c.id); }
+    const yearRows = [...years.entries()].map(([k, v]) => [k, v.size]).sort((a, b) => (a[0] === "No expiry") - (b[0] === "No expiry") || a[0].localeCompare(b[0]));
+
+    const noLoc = all.filter((c) => !placesOf(c).length).length;
+    let out = `<div class="tiles">
+      ${tile(n(all.length), "people")}
+      ${tile(n(cur.length), "current")}
+      ${tile(n(all.length - cur.length), "expired")}
+      ${tile(n(cities.size), cities.size === 1 ? "city" : "cities")}
+      ${tile(n(countries.size), countries.size === 1 ? "country" : "countries")}
+      ${tile(n(noLoc), "no location")}
+    </div>`;
+    if (facts.length) out += `<h3>Highlights</h3><ul class="facts">${facts.map((f) => `<li>${f}</li>`).join("")}</ul>`;
+    if (cities.size) out += `<h3>Top cities</h3>${bars(top(sizes(cities), 6))}<p class="stat-note">Current people only; someone with two places counts in both.</p>`;
+    if (countries.size > 1) out += `<h3>Countries</h3>${bars(top(sizes(countries), 6))}`;
+    out += `<h3>Catching up</h3><div class="tiles">
+      ${tile(n(meetings.length), "meetings logged")}
+      ${tile(n(recent), "in the last year")}
+      ${tile(n(neverMet.length), "current, never met")}
+    </div>`;
+    out += `<p class="stat-note">${met.length} of ${all.length} have at least one logged meeting. ${stale.length} current ${stale.length === 1 ? "person has" : "people have"} not been met in over a year.</p>`;
+    if (mets.size) out += `<h3>Where you met</h3>${bars(top(sizes(mets), 6).map(([k, v]) => [metLabel.get(k), v]))}`;
+    if (tags.size) out += `<h3>Tags</h3>${bars(top(sizes(tags), 6))}`;
+    if (yearRows.length > 1 || (yearRows[0] && yearRows[0][0] !== "No expiry")) out += `<h3>Expiry by year</h3>${bars(yearRows)}<p class="stat-note">The last year each current person counts as being there.</p>`;
+    return out;
+  }
+  $("#stats-btn").addEventListener("click", () => {
+    $("#stats-body").innerHTML = statsHTML();
+    $("#stats").showModal();
   });
 
   // ---------- Start ----------

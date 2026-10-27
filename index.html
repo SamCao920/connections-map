@@ -34,6 +34,9 @@
       <h1>Connections</h1>
       <div class="head-actions">
         <span class="sync" id="sync" role="status" aria-live="polite"></span>
+        <button class="icon-btn" id="stats-btn" aria-label="Statistics" title="Statistics">
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M4 20.2a.8.8 0 0 1-.8-.8V4.6a.8.8 0 0 1 1.6 0v14h15a.8.8 0 0 1 0 1.6H4Zm3.4-3.4a.8.8 0 0 1-.8-.8v-4.4a.8.8 0 0 1 1.6 0V16a.8.8 0 0 1-.8.8Zm4.4 0a.8.8 0 0 1-.8-.8V7.6a.8.8 0 0 1 1.6 0V16a.8.8 0 0 1-.8.8Zm4.4 0a.8.8 0 0 1-.8-.8v-6a.8.8 0 0 1 1.6 0v6a.8.8 0 0 1-.8.8Z"/></svg>
+        </button>
         <button class="icon-btn" id="theme-btn" aria-label="Switch to dark mode" title="Light / dark">
           <svg class="i-moon" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M20.4 14.6A8.5 8.5 0 0 1 9.4 3.6a.6.6 0 0 0-.8-.7A9.5 9.5 0 1 0 21.1 15.4a.6.6 0 0 0-.7-.8Z"/></svg>
           <svg class="i-sun" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><circle cx="12" cy="12" r="4.5" fill="currentColor"/><g stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></g></svg>
@@ -70,6 +73,10 @@
         <label for="search" class="visually-hidden">Filter contacts</label>
         <input id="search" type="search" placeholder="Filter by name, place, tag" autocomplete="off">
         <label class="toggle"><input type="checkbox" id="show-expired" checked> Show expired</label>
+      </div>
+      <div id="tags-head" class="tags-head" hidden>
+        <button type="button" id="tags-toggle" class="tags-toggle" aria-expanded="true" aria-controls="tag-bar"><span class="chev" aria-hidden="true"></span><span id="tags-label">Tags</span></button>
+        <button type="button" id="tags-clear" class="link-btn small" hidden>Clear</button>
       </div>
       <div id="tag-bar" class="tag-bar"></div>
 
@@ -180,6 +187,17 @@
     <div id="pick-hint" class="pick-hint" hidden>Tap the map to place this person</div>
   </main>
 </div>
+
+<!-- Statistics -->
+<dialog id="stats" class="wide-dialog">
+  <form method="dialog">
+    <h2>Statistics</h2>
+    <div id="stats-body"></div>
+    <div class="form-actions" style="margin-top:16px">
+      <button type="submit" class="btn" value="close">Close</button>
+    </div>
+  </form>
+</dialog>
 
 <!-- Settings -->
 <dialog id="settings">

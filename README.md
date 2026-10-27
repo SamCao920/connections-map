@@ -8,6 +8,8 @@ A private map of the people you know, so that when you visit a city you remember
 - **Who’s near:** type a city and a radius to list everyone within range, current people first.
 - **Trip alerts:** an optional daily task reads travel bookings from your email and calendar, writes them to `trips.json` in your data repo, and notifies you who lives near each destination. Upcoming trips show as cards at the top of the list.
 - **Expiry check-ins:** a month before someone expires, a card asks whether they’re still there (extend a year, mark moved, or remove).
+- **Statistics:** the chart button shows totals, top cities and countries, farthest-apart pair, meeting counts, who you haven’t seen in a year, where you met people, tags, and expiries by year.
+- **Collapsible tags:** fold the tag list away; the choice is remembered, and active filters stay visible in the heading.
 - **Import from Apple Contacts:** load a vCard export and tick who to add; addresses are placed on the map.
 - Light and dark mode, frosted-glass interface, works on phone and laptop.
 
