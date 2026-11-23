@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <defs>
+    <linearGradient id="pin-grad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#3b64f8" class="pin-top"/>
+      <stop offset="100%" stop-color="#1836b2" class="pin-bot"/>
+    </linearGradient>
+    <style>
+      .pin-body { fill: url(#pin-grad); }
+      .rim-highlight { stroke: rgba(255, 255, 255, 0.45); }
+      .network-line { stroke: #ffffff; stroke-width: 1.8; stroke-linecap: round; }
+      .network-node { fill: #ffffff; }
+
+      @media (prefers-color-scheme: dark) {
+        .pin-top { stop-color: #557cff; }
+        .pin-bot { stop-color: #264be0; }
+        .rim-highlight { stroke: rgba(255, 255, 255, 0.65); }
+      }
+    </style>
+  </defs>
+
+  <!-- Location Pin Body -->
+  <path class="pin-body" d="M16 2.5C9.65 2.5 4.5 7.65 4.5 14C4.5 21.2 13.2 28.5 15.35 30.15a1 1 0 0 0 1.3 0C18.8 28.5 27.5 21.2 27.5 14c0-6.35-5.15-11.5-11.5-11.5Z"/>
+
+  <!-- Liquid Glass Specular Rim Highlight -->
+  <path class="rim-highlight" d="M7 13.5C7 8.5 11 4.5 16 4.5" fill="none" stroke-width="1.3" stroke-linecap="round"/>
+
+  <!-- Constellation Network (3 Connected Nodes) -->
+  <line class="network-line" x1="16" y1="8.5" x2="10.8" y2="17"/>
+  <line class="network-line" x1="16" y1="8.5" x2="21.2" y2="17"/>
+  <line class="network-line" x1="10.8" y1="17" x2="21.2" y2="17"/>
+  <circle class="network-node" cx="16" cy="8.5" r="2.2"/>
+  <circle class="network-node" cx="10.8" cy="17" r="2.2"/>
+  <circle class="network-node" cx="21.2" cy="17" r="2.2"/>
+</svg>
