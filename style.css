@@ -6,7 +6,7 @@
   --line: #cbd5dc;
   --cobalt: #2443c9;
   --cobalt-ink: #ffffff;
-  --faded: #a3adb6;
+  --faded: #606d79;
   --danger: #b3261e;
   --hilite: #fff4c2;
   --display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", "Helvetica Neue", system-ui, sans-serif;
@@ -16,13 +16,13 @@
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --paper: #10161d; --panel: #17202a; --ink: #e6ecf1; --muted: #93a1ae;
-    --line: #2a3743; --cobalt: #7e98ff; --cobalt-ink: #0d1530; --faded: #55626e;
+    --line: #2a3743; --cobalt: #7e98ff; --cobalt-ink: #0d1530; --faded: #8c9ba8;
     --danger: #ff8a80; --hilite: #3a3415; color-scheme: dark;
   }
 }
 :root[data-theme="dark"] {
   --paper: #10161d; --panel: #17202a; --ink: #e6ecf1; --muted: #93a1ae;
-  --line: #2a3743; --cobalt: #7e98ff; --cobalt-ink: #0d1530; --faded: #55626e;
+  --line: #2a3743; --cobalt: #7e98ff; --cobalt-ink: #0d1530; --faded: #8c9ba8;
   --danger: #ff8a80; --hilite: #3a3415; color-scheme: dark;
 }
 
@@ -59,6 +59,10 @@ body { overflow: hidden; }
   .list-foot { position: sticky; bottom: 0; background: var(--panel); margin-top: auto; }
   .map-wrap { grid-row: 1; }
   .panel { grid-row: 2; border-right: 0; border-top: 1px solid var(--line); }
+  input, select, textarea { font-size: 16px; }
+  .log-new-row { flex-wrap: wrap; }
+  .log-new-row input[type="date"] { width: 100%; }
+  .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 .panel-head {
@@ -101,7 +105,7 @@ textarea { resize: vertical; width: 100%; }
 .btn.primary { background: var(--cobalt); color: var(--cobalt-ink); border-color: var(--cobalt); font-weight: 600; }
 .btn.danger { color: var(--danger); margin-left: auto; }
 .btn.wide { width: 100%; }
-.icon-btn { background: none; border: 0; padding: 4px; cursor: pointer; color: var(--muted); border-radius: 6px; display: grid; }
+.icon-btn { background: none; border: 0; padding: 10px; cursor: pointer; color: var(--muted); border-radius: 6px; display: grid; min-width: 44px; min-height: 44px; place-content: center; }
 .icon-btn:hover { color: var(--ink); }
 .link-btn { background: none; border: 0; padding: 0; color: var(--cobalt); text-decoration: underline; cursor: pointer; }
 
@@ -192,6 +196,8 @@ dialog {
   border: 1px solid var(--line); border-radius: 10px; padding: 20px;
   background: var(--panel); color: var(--ink);
   width: min(460px, calc(100vw - 32px));
+  max-height: min(90dvh, 720px);
+  overflow-y: auto;
 }
 dialog::backdrop { background: rgba(10, 16, 24, 0.45); }
 dialog .field > input { width: 100%; }
@@ -199,7 +205,20 @@ dialog hr { border: 0; border-top: 1px solid var(--line); margin: 18px 0 14px; }
 .help { font-size: 13px; margin: 0 0 12px; }
 .help ol { padding-left: 18px; margin: 6px 0 0; }
 .help code { font-size: 12px; }
-.file-btn { display: inline-block; }
+.file-btn { display: inline-block; cursor: pointer; }
+.file-btn:focus-within { outline: 2px solid var(--cobalt); outline-offset: 2px; border-radius: 6px; }
+.leaflet-container a.leaflet-popup-close-button {
+  color: var(--muted);
+  padding: 6px;
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+}
+.leaflet-container a.leaflet-popup-close-button:hover,
+.leaflet-container a.leaflet-popup-close-button:focus-visible {
+  color: var(--ink);
+}
 
 @media (prefers-reduced-motion: reduce) {
   .leaflet-fade-anim .leaflet-popup, .leaflet-zoom-anim .leaflet-zoom-animated { transition: none !important; }
@@ -228,7 +247,7 @@ dialog hr { border: 0; border-top: 1px solid var(--line); margin: 18px 0 14px; }
   display: inline-flex; align-items: center; gap: 2px;
   background: var(--ink); color: var(--panel); border-radius: 999px; padding: 1px 4px 1px 9px; font-size: 13px;
 }
-.chip button { background: none; border: 0; color: inherit; cursor: pointer; padding: 0 4px; font-size: 15px; line-height: 1; }
+.chip button { background: none; border: 0; color: inherit; cursor: pointer; padding: 2px 6px; font-size: 15px; line-height: 1; min-width: 24px; min-height: 24px; display: inline-grid; place-items: center; }
 .combo > input { width: 100%; }
 .place-chips { list-style: none; margin: 0 0 8px; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
 .place-chips:empty { display: none; }
@@ -249,7 +268,7 @@ dialog hr { border: 0; border-top: 1px solid var(--line); margin: 18px 0 14px; }
 .log-head { display: flex; align-items: baseline; gap: 8px; }
 .log-date { font-weight: 600; font-size: 13px; white-space: nowrap; }
 .log-where { font-size: 13px; color: var(--muted); }
-.log-del { margin-left: auto; background: none; border: 0; color: var(--muted); cursor: pointer; font-size: 16px; line-height: 1; padding: 0 4px; }
+.log-del { margin-left: auto; background: none; border: 0; color: var(--muted); cursor: pointer; font-size: 16px; line-height: 1; padding: 4px 8px; min-width: 32px; min-height: 32px; display: inline-grid; place-items: center; }
 .log-del:hover { color: var(--danger); }
 .log-note { margin: 2px 0 0; font-size: 14px; white-space: pre-wrap; }
 
@@ -290,7 +309,7 @@ button.card-main { cursor: pointer; }
 .card-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .btn.small { padding: 3px 10px; font-size: 13px; }
 .danger-text { color: var(--danger); }
-.card-x { background: none; border: 0; color: var(--muted); font-size: 17px; line-height: 1; padding: 10px 12px 6px 4px; cursor: pointer; }
+.card-x { background: none; border: 0; color: var(--muted); font-size: 17px; line-height: 1; padding: 10px 12px; cursor: pointer; min-width: 44px; min-height: 44px; display: grid; place-items: center; }
 .card-x:hover { color: var(--ink); }
 
 /* Notification setup */
@@ -301,7 +320,7 @@ button.card-main { cursor: pointer; }
 
 /* Collapsible tags */
 .tags-head { display: flex; align-items: center; justify-content: space-between; padding: 0 16px 4px; }
-.tags-toggle { display: inline-flex; align-items: center; gap: 6px; background: none; border: 0; padding: 2px 0; font: inherit; font-size: 12px; color: var(--muted); cursor: pointer; }
+.tags-toggle { display: inline-flex; align-items: center; gap: 6px; background: none; border: 0; padding: 6px 0; min-height: 36px; font: inherit; font-size: 12px; color: var(--muted); cursor: pointer; }
 .tags-toggle:hover { color: var(--ink); }
 .chev { width: 7px; height: 7px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(45deg); transition: transform .15s; margin-top: -3px; }
 .tags-toggle[aria-expanded="false"] .chev { transform: rotate(-45deg); margin-top: 0; }

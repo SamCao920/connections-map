@@ -46,7 +46,7 @@
   }
   function fmtMonth(iso) {
     const d = new Date(iso);
-    return `${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
+    return `${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
   }
   function expiryText(c) {
     if (!c.expiresAt) return "";
@@ -70,28 +70,37 @@
     const ps = placesOf(c);
     return ps.length === 1 ? ps[0].label : ps.map(shortName).join(" + ");
   };
+  let geocodeChain = Promise.resolve();
   let lastGeocode = 0;
-  async function geocode(q) {
-    // Nominatim asks for at most 1 request per second.
-    const wait = 1100 - (Date.now() - lastGeocode);
-    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
-    lastGeocode = Date.now();
-    const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&limit=5&q=${encodeURIComponent(q)}`;
-    const res = await fetch(url, { headers: { "Accept-Language": "en" } });
-    if (!res.ok) throw new Error(`Place search failed (${res.status})`);
-    const rows = await res.json();
-    return rows.map((r) => ({ label: placeLabel(r), lat: +r.lat, lng: +r.lon }));
+  function rateLimitedGeocode(fn) {
+    const run = async () => {
+      const wait = 1100 - (Date.now() - lastGeocode);
+      if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+      lastGeocode = Date.now();
+      return fn();
+    };
+    const next = geocodeChain.then(run, run);
+    geocodeChain = next.catch(() => {});
+    return next;
   }
-  async function reverseGeocode(lat, lng) {
-    const wait = 1100 - (Date.now() - lastGeocode);
-    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
-    lastGeocode = Date.now();
-    const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&addressdetails=1&zoom=10&lat=${lat}&lon=${lng}`;
-    try {
+  function geocode(q) {
+    return rateLimitedGeocode(async () => {
+      const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&limit=5&q=${encodeURIComponent(q)}`;
       const res = await fetch(url, { headers: { "Accept-Language": "en" } });
-      if (!res.ok) throw 0;
-      return placeLabel(await res.json());
-    } catch { return `${lat.toFixed(3)}, ${lng.toFixed(3)}`; }
+      if (!res.ok) throw new Error(`Place search failed (${res.status})`);
+      const rows = await res.json();
+      return rows.map((r) => ({ label: placeLabel(r), lat: +r.lat, lng: +r.lon }));
+    });
+  }
+  function reverseGeocode(lat, lng) {
+    return rateLimitedGeocode(async () => {
+      const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&addressdetails=1&zoom=10&lat=${lat}&lon=${lng}`;
+      try {
+        const res = await fetch(url, { headers: { "Accept-Language": "en" } });
+        if (!res.ok) throw 0;
+        return placeLabel(await res.json());
+      } catch { return `${lat.toFixed(3)}, ${lng.toFixed(3)}`; }
+    });
   }
   function placeLabel(r) {
     const a = r.address || {};
@@ -105,7 +114,7 @@
   function b64encode(str) {
     const bytes = new TextEncoder().encode(str);
     let bin = "";
-    for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    for (let i = 0; i < bytes.length; i += 0x1000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x1000));
     return btoa(bin);
   }
   function b64decode(b64) {
@@ -213,6 +222,7 @@
   }
 
   let saveTimer = null, saving = false, pending = false, dirty = false;
+  let purgeLocalAfterSave = false;
   function save() {
     data.updatedAt = nowISO();
     if (!connected()) { store.set(K.local, data); return; }
@@ -220,7 +230,10 @@
     dirty = true;
     setSync("Saving…");
     clearTimeout(saveTimer);
-    saveTimer = setTimeout(flush, 600);
+    saveTimer = setTimeout(() => {
+      saveTimer = null;
+      flush();
+    }, 600);
   }
   async function flush() {
     if (saving) { pending = true; return; }
@@ -228,7 +241,16 @@
     try {
       for (let attempt = 0; attempt < 3; attempt++) {
         const r = await ghWrite(data, sha);
-        if (!r.conflict) { sha = r.sha; if (!pending) dirty = false; setSync("Synced"); break; }
+        if (!r.conflict) {
+          sha = r.sha;
+          if (!pending && !saveTimer) dirty = false;
+          setSync("Synced");
+          if (purgeLocalAfterSave) {
+            store.del(K.local);
+            purgeLocalAfterSave = false;
+          }
+          break;
+        }
         // Someone (another device) saved first: pull, merge, retry.
         const remote = await ghRead();
         data = merge(remote.data, data);
@@ -386,7 +408,7 @@
       $("#list").innerHTML = `<li class="empty"><p class="muted">${nearFilter ? `No one within ${nearFilter.miles} miles of ${esc(nearFilter.label)}.` : "No matches."}</p></li>`;
     }
 
-    drawMarkers(nearFilter ? list : filtered());
+    drawMarkers(list);
     renderAttention();
   }
 
@@ -421,7 +443,11 @@
     activeTags.has(t) ? activeTags.delete(t) : activeTags.add(t);
     render();
   });
-  $("#search").addEventListener("input", render);
+  let searchTimer = null;
+  $("#search").addEventListener("input", () => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(render, 150);
+  });
   $("#show-expired").addEventListener("change", render);
 
   // ---------- Near search ----------
@@ -481,12 +507,19 @@
     if (mode === "none") return null;
     if (mode === "date") {
       const m = +$("#f-exp-month").value, y = +$("#f-exp-year").value;
-      return new Date(y, m + 1, 1).toISOString(); // start of the following month
+      return new Date(Date.UTC(y, m + 1, 1, 0, 0, 0)).toISOString(); // start of the following month in UTC
     }
     const n = Math.max(1, Math.min(99, parseInt($("#f-exp-n").value, 10) || 1));
     const d = new Date();
-    if ($("#f-exp-unit").value === "years") d.setFullYear(d.getFullYear() + n);
-    else d.setMonth(d.getMonth() + n);
+    if ($("#f-exp-unit").value === "years") {
+      d.setFullYear(d.getFullYear() + n);
+    } else {
+      const curDay = d.getDate();
+      d.setDate(1);
+      d.setMonth(d.getMonth() + n);
+      const maxDays = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+      d.setDate(Math.min(curDay, maxDays));
+    }
     return d.toISOString();
   }
   function updateExpPreview() {
@@ -562,11 +595,12 @@
 
     if (c?.expiresAt) {
       const last = new Date(new Date(c.expiresAt).getTime() - 1);
-      $("#f-exp-month").value = last.getMonth();
-      if (![...$("#f-exp-year").options].some((o) => +o.value === last.getFullYear())) {
-        $("#f-exp-year").insertAdjacentHTML("beforeend", `<option value="${last.getFullYear()}">${last.getFullYear()}</option>`);
+      $("#f-exp-month").value = last.getUTCMonth();
+      const lastYear = last.getUTCFullYear();
+      if (![...$("#f-exp-year").options].some((o) => +o.value === lastYear)) {
+        $("#f-exp-year").insertAdjacentHTML("beforeend", `<option value="${lastYear}">${lastYear}</option>`);
       }
-      $("#f-exp-year").value = last.getFullYear();
+      $("#f-exp-year").value = lastYear;
       setExpMode("date");
     } else {
       const d = new Date(); d.setFullYear(d.getFullYear() + 1);
@@ -830,7 +864,20 @@
   $("#add-btn").addEventListener("click", () => openEdit(null));
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("#edit-view").hidden && !$("#settings").open) closeEdit(); });
 
-  // ---------- Settings ----------
+  // ---------- Settings & dialog backdrop dismissal ----------
+  document.querySelectorAll("dialog").forEach((d) => {
+    d.addEventListener("click", (e) => {
+      if (e.target !== d) return;
+      const rect = d.getBoundingClientRect();
+      const inBox =
+        rect.top <= e.clientY &&
+        e.clientY <= rect.top + rect.height &&
+        rect.left <= e.clientX &&
+        e.clientX <= rect.left + rect.width;
+      if (!inBox) d.close();
+    });
+  });
+
   const dlg = $("#settings");
   function openSettings() {
     $("#s-repo").value = settings.repo;
@@ -871,8 +918,12 @@
       $("#local-banner").hidden = true;
       setSync("Synced");
       render();
-      if (prevLocal.length) { save(); store.del(K.local); }
-      else if (!sha) save(); // create the file
+      if (prevLocal.length) {
+        purgeLocalAfterSave = true;
+        save();
+      } else if (!sha) {
+        save(); // create the file
+      }
     } catch (e) {
       settings = prev;
       msg.textContent = e.message;
@@ -916,7 +967,7 @@
   // and pull changes made on other devices.
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible" && $("#edit-view").hidden) {
-      if (connected() && !saving && !dirty) load(); else render();
+      if (connected() && !saving && !dirty && !saveTimer) load(); else render();
     }
   });
 
@@ -948,7 +999,13 @@
     const t = new Date(c.expiresAt).getTime();
     return t - now <= 30 * DAY && now - t <= 120 * DAY;
   }
+  const removeArmed = new Map();
+  function clearRemoveArmed() {
+    for (const t of removeArmed.values()) clearTimeout(t);
+    removeArmed.clear();
+  }
   function renderAttention() {
+    clearRemoveArmed();
     const box = $("#attention");
     if (!$("#edit-view").hidden) return;
     const trips = upcomingTrips();
@@ -983,7 +1040,6 @@
     box.innerHTML = html.join("");
     box.hidden = !html.length;
   }
-  const removeArmed = new Map();
   $("#attention").addEventListener("click", (e) => {
     const b = e.target.closest("[data-act]");
     if (!b) return;
@@ -1014,12 +1070,20 @@
       $("#f-place-q").focus();
       return;
     } else if (act === "remove") {
-      if (!removeArmed.get(c.id)) {
-        removeArmed.set(c.id, setTimeout(() => { removeArmed.delete(c.id); b.textContent = "Remove"; }, 4000));
-        b.textContent = "Tap again";
+      if (b.dataset.armed !== "1") {
+        clearRemoveArmed();
+        b.dataset.armed = "1";
+        b.textContent = "Tap again to remove";
+        const t = setTimeout(() => {
+          b.dataset.armed = "";
+          b.textContent = "Remove";
+          removeArmed.delete(c.id);
+        }, 4000);
+        removeArmed.set(c.id, t);
         return;
       }
-      clearTimeout(removeArmed.get(c.id)); removeArmed.delete(c.id);
+      clearTimeout(removeArmed.get(c.id));
+      removeArmed.delete(c.id);
       data.contacts[i] = { id: c.id, deleted: true, updatedAt: nowISO() };
     }
     save();
@@ -1185,6 +1249,24 @@
   });
 
   // ---------- Apple Contacts (vCard) import ----------
+  function decodeQP(raw) {
+    const clean = raw.replace(/=\r?\n/g, "");
+    const bytes = [];
+    for (let i = 0; i < clean.length; i++) {
+      if (clean[i] === "=" && /^[0-9A-Fa-f]{2}$/.test(clean.slice(i + 1, i + 3))) {
+        bytes.push(parseInt(clean.slice(i + 1, i + 3), 16));
+        i += 2;
+      } else {
+        bytes.push(clean.charCodeAt(i));
+      }
+    }
+    try {
+      return new TextDecoder("utf-8").decode(new Uint8Array(bytes));
+    } catch {
+      return clean;
+    }
+  }
+
   function parseVcf(text) {
     // Unfold continuation lines, then split into cards.
     const lines = text.replace(/\r\n/g, "\n").replace(/\n[ \t]/g, "").split("\n");
@@ -1197,18 +1279,24 @@
       if (!cur) continue;
       const i = line.indexOf(":");
       if (i < 0) continue;
-      const key = line.slice(0, i).replace(/^item\d+\./i, "").split(";")[0].toUpperCase();
-      const val = line.slice(i + 1);
-      if (key === "FN") cur.name = unesc(val);
+      const rawKey = line.slice(0, i);
+      const isQP = /ENCODING=QUOTED-PRINTABLE/i.test(rawKey);
+      const key = rawKey.replace(/^item\d+\./i, "").split(";")[0].toUpperCase();
+      let val = line.slice(i + 1);
+      if (isQP) val = decodeQP(val);
+      if (key === "FN") {
+        const fn = unesc(val);
+        if (fn) cur.name = fn;
+      }
       else if (key === "N" && !cur.name) {
-        const [last, first] = val.split(";").map(unesc);
+        const [last, first] = val.split(/(?<!\\);/).map(unesc);
         cur.name = [first, last].filter(Boolean).join(" ");
       }
       else if (key === "EMAIL") cur.emails.push(unesc(val));
       else if (key === "TEL") cur.phones.push(unesc(val));
-      else if (key === "ORG" && !cur.org) cur.org = unesc(val.split(";")[0]);
+      else if (key === "ORG" && !cur.org) cur.org = unesc(val.split(/(?<!\\);/)[0]);
       else if (key === "ADR" && !cur.adr) {
-        const p = val.split(";").map(unesc); // pobox;ext;street;city;region;postal;country
+        const p = val.split(/(?<!\\);/).map(unesc); // pobox;ext;street;city;region;postal;country
         const city = p[3] || "", region = p[4] || "", country = p[6] || "";
         if (city || region || country) cur.adr = { city, region, country, query: [city, region, country].filter(Boolean).join(", ") };
       }
@@ -1265,12 +1353,16 @@
     vdlg.showModal();
     drawVcf();
   });
+  let vcfActive = false;
+  vdlg.addEventListener("close", () => { vcfActive = false; });
   $("#vcf-go").addEventListener("click", async () => {
+    vcfActive = true;
     const todo = vcfCards.filter((c) => c.selected && !c.state);
     const btn = $("#vcf-go");
     btn.disabled = true;
     let i = 0;
     for (const c of todo) {
+      if (!vcfActive) break;
       i++;
       $("#vcf-msg").textContent = `Placing ${i} of ${todo.length}… (about ${todo.length - i + 1} s left)`;
       let place = null;
@@ -1279,10 +1371,12 @@
         const tries = [c.adr.query, [c.adr.city, c.adr.country].filter(Boolean).join(", "), c.adr.city]
           .filter((q, k, a) => q && a.indexOf(q) === k);
         for (const q of tries) {
+          if (!vcfActive) break;
           try { [place] = await geocode(q); } catch {}
           if (place) break;
         }
       }
+      if (!vcfActive) break;
       const now = nowISO();
       data.contacts.push({
         id: uid(), name: c.name,
@@ -1296,9 +1390,10 @@
       c.placeLabel = place?.label;
       drawVcf();
     }
+    vcfActive = false;
     save();
     render();
-    $("#vcf-msg").textContent = `Added ${todo.length}. They’re tagged “imported” so you can find and tidy them.`;
+    $("#vcf-msg").textContent = `Added ${todo.filter((c) => c.state).length}. They’re tagged “imported” so you can find and tidy them.`;
     btn.disabled = false;
     drawVcf();
   });
@@ -1374,7 +1469,7 @@
     const tags = new Map();
     for (const c of all) for (const t of c.tags || []) bump(tags, t, c.id);
     const years = new Map();
-    for (const c of cur) { const y = c.expiresAt ? String(new Date(new Date(c.expiresAt).getTime() - 1).getFullYear()) : "No expiry"; bump(years, y, c.id); }
+    for (const c of cur) { const y = c.expiresAt ? String(new Date(new Date(c.expiresAt).getTime() - 1).getUTCFullYear()) : "No expiry"; bump(years, y, c.id); }
     const yearRows = [...years.entries()].map(([k, v]) => [k, v.size]).sort((a, b) => (a[0] === "No expiry") - (b[0] === "No expiry") || a[0].localeCompare(b[0]));
 
     const noLoc = all.filter((c) => !placesOf(c).length).length;
@@ -1406,6 +1501,11 @@
   });
 
   // ---------- Start ----------
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", () => {
+      navigator.serviceWorker.register("sw.js").catch(() => {});
+    });
+  }
   showView("list");
   load().then(() => fitTo(live()));
 })();
